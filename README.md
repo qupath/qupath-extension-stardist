@@ -1,3 +1,5 @@
+> **Note that this is still in development until QuPath v0.3.0 is available**
+
 # QuPath StarDist extension
 
 Welcome to the StarDist extension for [QuPath](http://qupath.github.io)!
@@ -97,8 +99,6 @@ You should also cite the QuPath publication, as described [here](https://qupath.
 
 
 ## Building
-
-### Extension + dependencies separately
 
 You can build the QuPath StarDist extension from source with
 
