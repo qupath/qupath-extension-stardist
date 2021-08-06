@@ -24,8 +24,8 @@ The StarDist extension is then run from a script, for example
 ```groovy
 import qupath.ext.stardist.StarDist2D
 
-// Specify the model directory (you will need to change this!)
-def pathModel = '/path/to/dsb2018_heavy_augment'
+// Specify the model .pb file (you will need to change this!)
+def pathModel = '/path/to/dsb2018_heavy_augment.pb'
 
 def stardist = StarDist2D.builder(pathModel)
         .threshold(0.5)              // Probability (detection) threshold
@@ -65,6 +65,10 @@ You can download example *SavedModels* from StarDist's developers at https://git
 
 These will need to be unzipped, and the paths to the model directory included in the above script instead of the *.pb* file.
 
+```groovy
+// Specify the model directory (you will need to change this!)
+def pathModel = '/path/to/dsb2018_heavy_augment'
+```
 
 > TensorFlow Java doesn't currently work with Apple Silicon, however OpenCV does.
 
