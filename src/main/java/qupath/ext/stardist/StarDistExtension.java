@@ -51,7 +51,7 @@ public class StarDistExtension implements QuPathExtension, GitHubProject {
 	
 	@Override
 	public Version getQuPathVersion() {
-		return Version.parse("0.3.0-SNAPSHOT");
+		return Version.parse("0.3.0-rc2");
 	}
 
 	@Override
