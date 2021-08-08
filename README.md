@@ -14,8 +14,12 @@ It is intended for the (at the time of writing) not-yet-released QuPath v0.3, an
 
 ## Installing
 
-To install the StarDist extension, download the latest `qupath-extension-stardist-[version].jar` file and drag it onto QuPath when it is running.
-You will then be prompted to ask whether you want to copy the file to the appropriate folder.
+To install the StarDist extension, download the latest `qupath-extension-stardist-[version].jar` file from [releases](https://github.com/qupath/qupath-extension-stardist/releases) and drag it onto the main QuPath window.
+
+If you haven't installed any extensions before, you'll be prompted to select a QuPath user directory.
+The extension will then be copied to a location inside that directory.
+
+You might then need to restart QuPath (but not your computer).
 
 
 ## Running
