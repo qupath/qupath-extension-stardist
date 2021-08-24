@@ -80,7 +80,6 @@ import qupath.opencv.dnn.DnnTools;
 import qupath.opencv.ops.ImageDataOp;
 import qupath.opencv.ops.ImageOp;
 import qupath.opencv.ops.ImageOps;
-import qupath.opencv.tools.OpenCVTools;
 
 /**
  * Cell detection based on the following method:
@@ -118,6 +117,8 @@ public class StarDist2D {
 		private ColorTransform[] channels = new ColorTransform[0];
 		
 		private double threshold = 0.5;
+		
+		private int pad = 32;
 		
 		private double simplifyDistance = 1.4;
 		private double cellExpansion = Double.NaN;
@@ -201,6 +202,7 @@ public class StarDist2D {
 			this.simplifyDistance = distance;
 			return this;
 		}
+		
 		
 		/**
 		 * Specify channels. Useful for detecting nuclei for one channel 
@@ -480,12 +482,9 @@ public class StarDist2D {
 		 * Amount to pad tiles to reduce boundary artifacts.
 		 * @param pad padding in pixels; width and height of tiles will be increased by pad x 2.
 		 * @return this builder
-		 * @deprecated padding is no longer supported and this method has no effect
 		 */
-		@Deprecated
 		public Builder padding(int pad) {
-			logger.warn("Tile padding is no longer supported - this method has no effect");
-//			this.pad = pad;
+			this.pad = pad;
 			return this;
 		}
 				
@@ -596,6 +595,7 @@ public class StarDist2D {
 			stardist.cellExpansion = cellExpansion;
 			stardist.tileWidth = tileWidth;
 			stardist.tileHeight = tileHeight;
+			stardist.pad = pad;
 			stardist.includeProbability = includeProbability;
 			stardist.ignoreCellOverlaps = ignoreCellOverlaps;
 			stardist.measureShape = measureShape;
@@ -646,6 +646,8 @@ public class StarDist2D {
 	
 	private int tileWidth = 1024;
 	private int tileHeight = 1024;
+	
+	private int pad = 0;
 
 	private boolean measureShape = false;
 
@@ -769,7 +771,7 @@ public class StarDist2D {
 		}
 		int tw = tileWidth <= 0 ? defaultTileSize : tileWidth;
 		int th = tileHeight <= 0 ? defaultTileSize : tileWidth;
-		var opServer = ImageOps.buildServer(imageData, op, resolution, tw, th);
+		var opServer = ImageOps.buildServer(imageData, op, resolution, tw - pad*2, th - pad*2);
 //		var opServer = ImageOps.buildServer(imageData, op, resolution, tileWidth-pad*2, tileHeight-pad*2);
 		
 		RegionRequest request;
@@ -814,7 +816,7 @@ public class StarDist2D {
 		}
 		
 		// Convert to detections, dilating to approximate cells if necessary
-		// Drop cells if they fail (rather than catastropically give up)
+		// Drop cells if they fail (rather than catastrophically give up)
 		var detections = nuclei.parallelStream()
 				.map(n -> {
 					try {
@@ -1042,31 +1044,45 @@ public class StarDist2D {
 		if (cancelRuns)
 			Collections.emptyList();
 		
+		// Create a mask around pixels we can use
+		var regionMask = GeometryTools.createRectangle(request.getX(), request.getY(), request.getWidth(), request.getHeight());
+		if (mask == null)
+			mask = regionMask;
+		else
+			mask = GeometryTools.attemptOperation(mask, m -> m.intersection(regionMask));
+
+		// Create a padded request, if we need one
+		RegionRequest requestPadded = request;
+		if (pad > 0) {
+			double downsample = request.getDownsample();
+			var server = imageData.getServer();
+			int x1 = (int)Math.max(0, Math.round(request.getX() - downsample * pad));
+			int y1 = (int)Math.max(0, Math.round(request.getY() - downsample * pad));
+			int x2 = (int)Math.min(server.getWidth(), Math.round(request.getMaxX() + downsample * pad));
+			int y2 = (int)Math.min(server.getHeight(), Math.round(request.getMaxY() + downsample * pad));
+			requestPadded = RegionRequest.createInstance(server.getPath(), downsample, x1, y1, x2-x1, y2-y1);
+		}
+		
 		try (@SuppressWarnings("unchecked")
 		var scope = new PointerScope()) {
 			Mat mat;
 			try {
-				mat = op.apply(imageData, request);
+				mat = op.apply(imageData, requestPadded);
 			} catch (IOException e) {
 				logger.error(e.getLocalizedMessage(), e);
 				return Collections.emptyList();
 			}
 						
-			// Calculate tile width & height.
+			// Calculate image width & height.
 			// These need to be consistent with the expected maximum number of pooling operations
 			// to avoid shape problems.
-			int tw = this.tileWidth;
-			int th = this.tileHeight;
 			int expectedPooling = 6; // A generous estimate (usually 3 or 4 expected)
 			int multiple = (int)Math.pow(2, expectedPooling);
-			if (tw <= 0)
-				tw = (int)Math.ceil(mat.cols()/(double)multiple) * multiple;
-			if (th <= 0)
-				th = (int)Math.ceil(mat.rows()/(double)multiple) * multiple;
-			
+			int tw = (int)Math.ceil(mat.cols()/(double)multiple) * multiple;
+			int th = (int)Math.ceil(mat.rows()/(double)multiple) * multiple;
+//			
 			// Ensure we have a Mat of the right size
 			var padding = ensureSize(mat, tw, th, opencv_core.BORDER_REFLECT);
-			
 			
 			boolean isFirstRun = firstRun.getAndSet(false);
 			
@@ -1118,11 +1134,6 @@ public class StarDist2D {
 				}
 			}
 			
-			// TODO: May need to consider padding!
-			
-//			OpenCVTools.matToImagePlus(mat, "Prediction " + request).show();
-			
-			
 			// Depending upon model export, we might have a half resolution prediction that needs to be rescaled
 			long inputWidth = mat.cols();
 			long inputHeight = mat.rows();
@@ -1135,28 +1146,14 @@ public class StarDist2D {
 					logger.debug("StarDist rescaling x={}, y={}", scaleX, scaleY);
 			}
 			
-			// We need to handle padding.
-			// You might think we just crop the prediction image, *but* that can be problematic if we have 
-			// scaleX/Y != 1 and an odd amount of padding in some dimension; the result is a subtle shift of 
-			// all coordinates.
-			// For that reason, we instead update the mask and compute the x,y origin for the image, passing 
-			// these values as doubles to createNuclei()
-			if (!padding.isEmpty()) {
-				var regionMask = GeometryTools.createRectangle(request.getX(), request.getY(), request.getWidth(), request.getHeight());
-				if (mask == null)
-					mask = regionMask;
-				else
-					mask = GeometryTools.attemptOperation(mask, m -> m.intersection(regionMask));
-			}
-			
 			// Convert predictions to potential nuclei
 			FloatIndexer indexerProb = matProb.createIndexer();
 			FloatIndexer indexerRays = matRays.createIndexer();
 			FloatIndexer indexerClassifications = matClassifications == null ? null : matClassifications.createIndexer();
 			nuclei = createNuclei(indexerProb, indexerRays, indexerClassifications,
-					request.getDownsample(),
-					request.getX() - request.getDownsample() * padding.getX1(),
-					request.getY() - request.getDownsample() * padding.getY1(),
+					requestPadded.getDownsample(),
+					requestPadded.getX() - requestPadded.getDownsample() * padding.getX1(),
+					requestPadded.getY() - requestPadded.getDownsample() * padding.getY1(),
 					scaleX,
 					scaleY,
 					mask);
@@ -1167,7 +1164,7 @@ public class StarDist2D {
 				while (iter.hasNext()) {
 					var n = iter.next();
 					var env = n.geometry.getEnvelopeInternal();
-					if (env.getMaxX() >= request.getMaxX() || env.getMaxY() >= request.getMaxY())
+					if (env.getMaxX() >= requestPadded.getMaxX() || env.getMaxY() >= requestPadded.getMaxY())
 						iter.remove();
 				}
 			}
