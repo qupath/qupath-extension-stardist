@@ -26,10 +26,10 @@ ext.moduleName = 'qupath.extension.stardist'
 
 description = 'QuPath extension to use StarDist'
 
-version = "0.3.0-SNAPSHOT"
+version = "0.3.0-rc2"
 
 dependencies {
-    def qupathVersion = "0.3.0-SNAPSHOT" // For now
+    def qupathVersion = "0.3.0-rc2" // For now
     
     shadow "io.github.qupath:qupath-gui-fx:${qupathVersion}"
     shadow "org.slf4j:slf4j-api:1.7.30"
