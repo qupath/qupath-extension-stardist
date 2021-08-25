@@ -803,6 +803,7 @@ public class StarDist2D {
 		else
 			log("Detecting nuclei");
 		var nuclei = tiles.parallelStream()
+				.filter(t -> mask == null || mask.intersects(GeometryTools.createRectangle(t.getImageX(), t.getImageY(), t.getImageWidth(), t.getImageHeight())))
 				.flatMap(t -> detectObjectsForTile(op, dnn, imageData, t.getRegionRequest(), tiles.size() > 1, mask).stream())
 				.collect(Collectors.toList());
 		
