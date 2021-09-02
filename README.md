@@ -1,5 +1,3 @@
-> **Note that this is still in development until QuPath v0.3.0 is available**
-
 # QuPath StarDist extension
 
 Welcome to the StarDist extension for [QuPath](http://qupath.github.io)!
@@ -8,9 +6,8 @@ This adds support for running the 2D version of StarDist nucleus detection devel
 
 It is intended for the (at the time of writing) not-yet-released QuPath v0.3, and remains in a not-quite-complete state.
 
-> **Note:** The implementation has changed from QuPath v0.2.
-> Nucleus classifications are now supported, but tile padding is not.
-> See the documentation for more details.
+> **Note:** The implementation has changed from QuPath v0.2, and the results may not be identical.
+> One new feature is that nucleus classifications - see [the documentation](https://qupath.readthedocs.io/en/stable/docs/advanced/stardist.html) for more details.
 
 ## Installing
 
