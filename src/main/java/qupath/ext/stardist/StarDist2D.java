@@ -925,6 +925,11 @@ public class StarDist2D {
 			if (mask != null)
 				geomCell = GeometryTools.attemptOperation(geomCell, g -> g.intersection(mask));
 			geomCell = simplify(geomCell);
+			
+			if (geomCell.isEmpty()) {
+				logger.warn("Empty cell boundary at {} will be skipped", nucleus.geometry.getCentroid());
+				return null;
+			}
 			var roiCell = GeometryTools.geometryToROI(geomCell, plane);
 			var roiNucleus = GeometryTools.geometryToROI(geomNucleus, plane);
 			if (creatorFun == null)
