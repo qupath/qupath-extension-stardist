@@ -80,6 +80,26 @@ def pathModel = '/path/to/dsb2018_heavy_augment'
 > TensorFlow Java doesn't currently work with Apple Silicon, however OpenCV does.
 
 
+### Using OpenVINO
+
+You can also use StarDist with OpenVINO
+
+You will need to build and install the [QuPath OpenVINO extension](https://github.com/dkurt/qupath-extension-openvino), and use alternative StarDist models in *OpenVINO IR* format.
+
+You can download example *SavedModels* from StarDist's developers at https://github.com/stardist/stardist-imagej/tree/master/src/main/resources/models/2D
+
+These will need to be unzipped, and the following commad executed to get *OpenVINO IR* (download from [here](https://software.intel.com/content/www/us/en/develop/tools/openvino-toolkit/download.html)):
+
+```bash
+python3 /opt/intel/openvino_2021/deployment_tools/model_optimizer/mo.py --input input --input_shape "[1,1024,1024,3]" --saved_model_dir=he_heavy_augment
+```
+
+Then use a path to `.xml` model file:
+
+```groovy
+def pathModel = '/path/to/saved_model.xml'
+```
+
 
 ### Converting a TensorFlow model for use with OpenCV
 

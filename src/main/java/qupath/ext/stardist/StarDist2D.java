@@ -556,7 +556,7 @@ public class StarDist2D {
 				if (!file.exists()) {
 					throw new IllegalArgumentException("I couldn't find the model file " + file.getAbsolutePath());
 				}
-				if (file.isFile()) {
+				if (file.isFile() && modelPath.endsWith(".pb")) {
 					try {
 						dnn = DnnTools.builder(modelPath)
 								.build();
@@ -568,20 +568,29 @@ public class StarDist2D {
 						throw new RuntimeException("Unable to load StarDist model from " + modelPath, e);
 					}
 				} else {
+					String framework = null;
+					String classname = null;
+					if (modelPath.endsWith(".xml")) {
+						classname = "qupath.ext.openvino.OpenVINOTools";
+						framework = "OpenVINO";
+					} else {
+						classname = "qupath.ext.tensorflow.TensorFlowTools";
+						framework = "TensorFlow";
+					}
 					try {
 						// For backwards compatibility, we try to support TensorFlow if the extension is installed
-						var clsTF = Class.forName("qupath.ext.tensorflow.TensorFlowTools");
+						var clsTF = Class.forName(classname);
 						var method = clsTF.getMethod("createDnnModel", String.class);
 						dnn = (DnnModel<?>)method.invoke(null, modelPath);
-						logger.debug("Loaded model {} with TensorFlow", modelPath);
+						logger.debug("Loaded model {} with {}", modelPath, framework);
 					} catch (Exception e) {
-						logger.error("Unable to load TensorFlow with reflection - are you sure it is available and on the classpath?");
+						logger.error("Unable to load {} with reflection - are you sure it is available and on the classpath?", framework);
 						logger.error(e.getLocalizedMessage(), e);
 						throw new RuntimeException("Unable to load StarDist model from " + modelPath, e);
 					}
 				}
 			}
-			
+
 //			var mlOp = ImageOps.ML.dnn(dnn, tileWidth, tileHeight, padding);
 //			mergedOps.add(mlOp);
 			mergedOps.add(ImageOps.Core.ensureType(PixelType.FLOAT32));
