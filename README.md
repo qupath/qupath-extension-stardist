@@ -88,10 +88,15 @@ You will need to build and install the [QuPath OpenVINO extension](https://githu
 
 You can download example *SavedModels* from StarDist's developers at https://github.com/stardist/stardist-imagej/tree/master/src/main/resources/models/2D
 
-These will need to be unzipped, and the following commad executed to get *OpenVINO IR* (download from [here](https://software.intel.com/content/www/us/en/develop/tools/openvino-toolkit/download.html)):
+These will need to be unzipped, and the following commad executed to get *OpenVINO IR* (we recommend to install required Python packages in the virtual environment):
 
 ```bash
-python3 /opt/intel/openvino_2021/deployment_tools/model_optimizer/mo.py --input input --input_shape "[1,1024,1024,3]" --saved_model_dir=he_heavy_augment
+python3 -m venv venv3
+source venv3/bin/activate
+pip install --upgrade pip
+pip install openvino-dev tensorflow
+
+python -m mo --input input --input_shape "[1,1024,1024,3]" --saved_model_dir=he_heavy_augment
 ```
 
 Then use a path to `.xml` model file:
