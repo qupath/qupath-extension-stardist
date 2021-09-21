@@ -96,7 +96,7 @@ source venv3/bin/activate
 pip install --upgrade pip
 pip install openvino-dev tensorflow
 
-python -m mo --input input --input_shape "[1,1024,1024,3]" --saved_model_dir=he_heavy_augment
+python -m mo --input input --data_type FP16 --input_shape "[1,1024,1024,3]" --saved_model_dir=he_heavy_augment
 ```
 
 Then use a path to `.xml` model file:
