@@ -84,7 +84,7 @@ def pathModel = '/path/to/dsb2018_heavy_augment'
 
 You can also use StarDist with OpenVINO
 
-You will need to build and install the [QuPath OpenVINO extension](https://github.com/dkurt/qupath-extension-openvino), and use alternative StarDist models in *OpenVINO IR* format.
+You will need to install [QuPath OpenVINO extension](https://github.com/dkurt/qupath-extension-openvino), and use alternative StarDist models in *OpenVINO IR* format.
 
 You can download example *SavedModels* from StarDist's developers at https://github.com/stardist/stardist-imagej/tree/master/src/main/resources/models/2D
 
