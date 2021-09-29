@@ -21,9 +21,14 @@ You might then need to restart QuPath (but not your computer).
 
 ## Running
 
+There are different ways to run the StarDist detection in QuPath, using different deep learning libraries.
+Choosing which to use can be a balance between convenience and performance, which might vary according to your hardware.
+
 ### Using OpenCV DNN
 
-To use the extension, you'll also need to download some pre-trained StarDist model files in *.pb* format.
+The easiest (but not necessarily fastest) way to run StarDist is using OpenCV.
+
+To do this, you'll also need to download some pre-trained StarDist model files in *.pb* format.
 You can find some [here](https://github.com/qupath/models/tree/main/stardist).
 
 The StarDist extension is then run from a script, for example
@@ -57,38 +62,63 @@ stardist.detectObjects(imageData, pathObjects)
 println 'Done!'
 ```
 
-For more examples, see [ReadTheDocs](https://qupath.readthedocs.io/en/stable/docs/advanced/stardist.html).
+For more examples, including additional instructions to add GPU support, see [ReadTheDocs](https://qupath.readthedocs.io/en/stable/docs/advanced/stardist.html).
 
-> The docs are currently a little out of date... most of the scripts should still work, but when using the extension, be sure to use the line `import qupath.ext.stardist.StarDist2D` rather than the older import statement with QuPath v0.2.
+#### Converting a TensorFlow model for use with OpenCV
 
-
-### Using TensorFlow
-
-You can also use StarDist with TensorFlow, but the setup is a lot more awkward.
-
-If you want to try it, you will need to build and install the [QuPath Tensorflow extension](https://github.com/qupath/qupath-extension-tensorflow), and use alternative StarDist models in *SavedModel* format.
-
-You can download example *SavedModels* from StarDist's developers at https://github.com/stardist/stardist-imagej/tree/master/src/main/resources/models/2D
-
-These will need to be unzipped, and the paths to the model directory included in the above script instead of the *.pb* file.
-
-```groovy
-// Specify the model directory (you will need to change this!)
-def pathModel = '/path/to/dsb2018_heavy_augment'
-```
-
-> TensorFlow Java doesn't currently work with Apple Silicon, however OpenCV does.
-
-
-
-### Converting a TensorFlow model for use with OpenCV
-
-You can convert TensorFlow *SavedModel* directories trained using StarDist to a frozen, OpenCV-friendly *.pb* format with the help of [tf2onnx](https://github.com/onnx/tensorflow-onnx).
+If you are training a new StarDist model, you will probably have a TensorFlow *SavedModel* directory.
+You can convert this to a frozen, OpenCV-friendly *.pb* format with the help of [tf2onnx](https://github.com/onnx/tensorflow-onnx).
 
 After installing both *TensorFlow* and *tf2onnx*, use:
 
 ```
 python -m tf2onnx.convert --opset 10 --saved-model "/path/to/saved/model/directory" --output_frozen_graph "/path/to/output/model/file.pb"
+```
+
+
+### Using TensorFlow
+
+You can also use StarDist with TensorFlow directly.
+This means that the *SavedModel* does not need to be converted, but setup in QuPath takes more effort.
+
+To try it, in additiont to adding the StarDist extension you will need to build and install the [QuPath Tensorflow extension](https://github.com/qupath/qupath-extension-tensorflow).
+
+Compatible *SavedModels* from StarDist's developers can be found at https://github.com/stardist/stardist-imagej/tree/master/src/main/resources/models/2D
+
+These will need to be unzipped, and the script to run StarDist changed as shown below:
+```groovy
+// Specify the model directory (you will need to change this!)
+def pathModel = '/path/to/saved_model'
+def dnn = qupath.ext.tensorflow.TensorFlowTools.createDnnModel(pathModel)
+
+def stardist = StarDist2D.builder(dnn)
+  ...
+  .build()
+
+...
+```
+
+> TensorFlow Java doesn't currently work with Apple Silicon, however OpenCV does.
+
+
+### Using OpenVINO
+
+You can also use StarDist with OpenVINO.
+
+You will need to install [QuPath OpenVINO extension](https://github.com/dkurt/qupath-extension-openvino) from @dkurt, and follow the instructions in the extension ReadMe to convert the StarDist models.
+
+The script to run StarDist then looks like:
+
+```groovy
+// Specify the model directory (you will need to change this!)
+def pathModel = '/path/to/converted_model.xml'
+var dnn = qupath.ext.openvino.OpenVINOTools.createDnnModel('/path/to/model.xml')
+
+def stardist = StarDist2D.builder(dnn)
+  ...
+  .build()
+
+...
 ```
 
 
