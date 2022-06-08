@@ -537,7 +537,7 @@ public class StarDist2D {
 		 * @return this builder
 		 */
 		public Builder inputScale(double... values) {
-			this.ops.add(ImageOps.Core.subtract(values));
+			this.ops.add(ImageOps.Core.multiply(values));
 			return this;
 		}
 		
