@@ -17,6 +17,7 @@
 package qupath.ext.stardist;
 
 import java.awt.image.BufferedImage;
+import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -47,8 +48,10 @@ import org.locationtech.jts.algorithm.locate.SimplePointInAreaLocator;
 import org.locationtech.jts.geom.Coordinate;
 import org.locationtech.jts.geom.Envelope;
 import org.locationtech.jts.geom.Geometry;
+import org.locationtech.jts.geom.GeometryCollection;
 import org.locationtech.jts.geom.Location;
 import org.locationtech.jts.geom.Polygon;
+import org.locationtech.jts.geom.util.GeometryFixer;
 import org.locationtech.jts.index.strtree.STRtree;
 import org.locationtech.jts.simplify.VWSimplifier;
 import org.slf4j.Logger;
@@ -97,7 +100,7 @@ import qupath.opencv.ops.ImageOps;
  * 
  * @author Pete Bankhead (this implementation, but based on the others)
  */
-public class StarDist2D {
+public class StarDist2D implements AutoCloseable {
 
 	private final static Logger logger = LoggerFactory.getLogger(StarDist2D.class);
 	
@@ -537,7 +540,7 @@ public class StarDist2D {
 		 * @return this builder
 		 */
 		public Builder inputScale(double... values) {
-			this.ops.add(ImageOps.Core.subtract(values));
+			this.ops.add(ImageOps.Core.multiply(values));
 			return this;
 		}
 		
@@ -921,10 +924,24 @@ public class StarDist2D {
 		var geomNucleus = simplify(nucleus.geometry);
 		PathObject pathObject;
 		if (cellExpansion > 0) {
+//			cellExpansion = geomNucleus.getPrecisionModel().makePrecise(cellExpansion);
+//			cellExpansion = Math.round(cellExpansion);
 			var geomCell = CellTools.estimateCellBoundary(geomNucleus, cellExpansion, cellConstrainScale);
-			if (mask != null)
+			if (geomCell instanceof GeometryCollection && geomNucleus instanceof Polygon) {
+				if (!geomCell.isValid()) {
+					// Sometimes buffer creates invalid geometries
+					// (Note that the fix should already be applied by estimateCellBoundary in v0.4.0)
+					geomCell = GeometryFixer.fix(geomCell);
+					logger.debug("Used GeometryFixer to fix an invalid cell boundary geometry");
+				}
+			}
+			if (mask != null) {
 				geomCell = GeometryTools.attemptOperation(geomCell, g -> g.intersection(mask));
+			}
 			geomCell = simplify(geomCell);
+			
+			// Intersection with complex mask could give linestrings - which we want to remove
+			geomCell = GeometryTools.ensurePolygonal(geomCell);
 			
 			if (geomCell.isEmpty()) {
 				logger.warn("Empty cell boundary at {} will be skipped", nucleus.geometry.getCentroid());
@@ -1068,6 +1085,13 @@ public class StarDist2D {
 			int y2 = (int)Math.min(server.getHeight(), Math.round(request.getMaxY() + downsample * pad));
 			requestPadded = RegionRequest.createInstance(server.getPath(), downsample, x1, y1, x2-x1, y2-y1);
 		}
+		
+//		// Hack to visualize the tiles that are computed (for debugging)
+//		imageData.getHierarchy().addPathObject(
+//				PathObjects.createAnnotationObject(
+//						ROIs.createRectangleROI(request),
+//						PathClassFactory.getPathClass("Temporary")
+//						));
 		
 		try (@SuppressWarnings("unchecked")
 		var scope = new PointerScope()) {
@@ -1350,6 +1374,11 @@ public class StarDist2D {
 	                if (envelope.intersects(env) && nucleus.geometry.intersects(nucleus2.geometry)) {
 	                	// Retain the nucleus only if it is not fragmented, or less than half its original area
 	                    var difference = nucleus2.geometry.difference(nucleus.geometry);
+	                    
+	                    // Discard linestrings
+	                    if (difference instanceof GeometryCollection)
+	                    	difference = GeometryTools.ensurePolygonal(difference);
+	                    
 	                    if (difference instanceof Polygon && difference.getArea() > nucleus2.fullArea / 2.0)
 	                        nucleus2.geometry = difference;
 	                    else {
@@ -1405,6 +1434,22 @@ public class StarDist2D {
 	    	return classification;
 	    }
 		
+	}
+
+
+	/**
+	 * Close and cleanup resources.
+	 * 
+	 * @implNote In practice, this means close any {@link DnnModel} stored if it is an instance of 
+	 * {@link Closeable} or {@link AutoCloseable}.
+	 * This can be important to avoid memory leaks, particularly if using a GPU.
+	 */
+	@Override
+	public void close() throws Exception {
+		if (dnn instanceof Closeable) {
+			((Closeable) dnn).close();
+		} else if (dnn instanceof AutoCloseable)
+			((AutoCloseable) dnn).close();
 	}
 	
 }
