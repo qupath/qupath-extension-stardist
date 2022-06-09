@@ -26,7 +26,7 @@ ext.moduleName = 'qupath.extension.stardist'
 
 description = 'QuPath extension to use StarDist'
 
-version = "0.3.1-SNAPSHOT"
+version = "0.3.1"
 
 dependencies {
     def qupathVersion = "0.3.0" // For now
