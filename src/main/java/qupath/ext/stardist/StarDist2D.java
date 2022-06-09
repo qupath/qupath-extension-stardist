@@ -51,6 +51,7 @@ import org.locationtech.jts.geom.Geometry;
 import org.locationtech.jts.geom.GeometryCollection;
 import org.locationtech.jts.geom.Location;
 import org.locationtech.jts.geom.Polygon;
+import org.locationtech.jts.geom.util.GeometryFixer;
 import org.locationtech.jts.index.strtree.STRtree;
 import org.locationtech.jts.simplify.VWSimplifier;
 import org.slf4j.Logger;
@@ -923,7 +924,17 @@ public class StarDist2D implements AutoCloseable {
 		var geomNucleus = simplify(nucleus.geometry);
 		PathObject pathObject;
 		if (cellExpansion > 0) {
+//			cellExpansion = geomNucleus.getPrecisionModel().makePrecise(cellExpansion);
+//			cellExpansion = Math.round(cellExpansion);
 			var geomCell = CellTools.estimateCellBoundary(geomNucleus, cellExpansion, cellConstrainScale);
+			if (geomCell instanceof GeometryCollection && geomNucleus instanceof Polygon) {
+				if (!geomCell.isValid()) {
+					// Sometimes buffer creates invalid geometries
+					// (Note that the fix should already be applied by estimateCellBoundary in v0.4.0)
+					geomCell = GeometryFixer.fix(geomCell);
+					logger.debug("Used GeometryFixer to fix an invalid cell boundary geometry");
+				}
+			}
 			if (mask != null) {
 				geomCell = GeometryTools.attemptOperation(geomCell, g -> g.intersection(mask));
 			}
