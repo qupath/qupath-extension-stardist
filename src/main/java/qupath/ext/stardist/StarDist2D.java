@@ -102,7 +102,7 @@ import qupath.opencv.ops.ImageOps;
  */
 public class StarDist2D implements AutoCloseable {
 
-	private final static Logger logger = LoggerFactory.getLogger(StarDist2D.class);
+	private static final Logger logger = LoggerFactory.getLogger(StarDist2D.class);
 	
 	private static int defaultTileSize = 1024;
 	
@@ -737,7 +737,7 @@ public class StarDist2D implements AutoCloseable {
 	 * @param fireUpdate if true, a hierarchy update will be fired on completion
 	 */
 	private void detectObjectsImpl(ImageData<BufferedImage> imageData, PathObject parent, boolean fireUpdate) {
-		Objects.nonNull(parent);
+		Objects.requireNonNull(parent);
 		// Lock early, so the user doesn't make modifications
 		boolean wasLocked = parent.isLocked();
 		parent.setLocked(true);
@@ -1083,7 +1083,7 @@ public class StarDist2D implements AutoCloseable {
 			int y1 = (int)Math.max(0, Math.round(request.getY() - downsample * pad));
 			int x2 = (int)Math.min(server.getWidth(), Math.round(request.getMaxX() + downsample * pad));
 			int y2 = (int)Math.min(server.getHeight(), Math.round(request.getMaxY() + downsample * pad));
-			requestPadded = RegionRequest.createInstance(server.getPath(), downsample, x1, y1, x2-x1, y2-y1);
+			requestPadded = RegionRequest.createInstance(server.getPath(), downsample, x1, y1, x2-x1, y2-y1, request.getZ(), request.getT());
 		}
 		
 //		// Hack to visualize the tiles that are computed (for debugging)
