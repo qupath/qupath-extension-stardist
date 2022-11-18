@@ -3,7 +3,7 @@ plugins {
   // To create a shadow/fat jar, including dependencies
   id 'com.github.johnrengelman.shadow' version '7.0.0'
   // To manage included native libraries
-  id 'org.bytedeco.gradle-javacpp-platform' version '1.5.7'
+  id 'org.bytedeco.gradle-javacpp-platform' version '1.5.8'
 }
 
 repositories {
@@ -26,13 +26,13 @@ ext.moduleName = 'qupath.extension.stardist'
 
 description = 'QuPath extension to use StarDist'
 
-version = "0.3.2"
+version = "0.4.0-SNAPSHOT"
 
 dependencies {
-    def qupathVersion = "0.3.0" // For now
+    def qupathVersion = "0.4.0-SNAPSHOT" // For now
     
     shadow "io.github.qupath:qupath-gui-fx:${qupathVersion}"
-    shadow "org.slf4j:slf4j-api:1.7.30"
+    shadow "org.slf4j:slf4j-api:2.0.0"
     
     testImplementation "io.github.qupath:qupath-gui-fx:${qupathVersion}"
     testImplementation "org.junit.jupiter:junit-jupiter-api:5.7.2"

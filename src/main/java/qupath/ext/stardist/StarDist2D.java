@@ -1,5 +1,5 @@
 /*-
- * Copyright 2020-2021 QuPath developers,  University of Edinburgh
+ * Copyright 2020-2022 QuPath developers,  University of Edinburgh
  * 
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -72,7 +72,6 @@ import qupath.lib.objects.PathCellObject;
 import qupath.lib.objects.PathObject;
 import qupath.lib.objects.PathObjects;
 import qupath.lib.objects.classes.PathClass;
-import qupath.lib.objects.classes.PathClassFactory;
 import qupath.lib.regions.ImagePlane;
 import qupath.lib.regions.Padding;
 import qupath.lib.regions.RegionRequest;
@@ -96,7 +95,7 @@ import qupath.opencv.ops.ImageOps;
  * Very much inspired by stardist-imagej at https://github.com/mpicbg-csbd/stardist-imagej but re-written from scratch to use OpenCV and 
  * adapt the method of converting predictions to contours (very slightly) to be more QuPath-friendly.
  * <p>
- * Models are expected in the same format as required by the Fiji plugin.
+ * Models are expected in the same format as required by the Fiji plugin, or converted to a frozen .pb file for use with OpenCV.
  * 
  * @author Pete Bankhead (this implementation, but based on the others)
  */
@@ -183,7 +182,8 @@ public class StarDist2D implements AutoCloseable {
 		}
 		
 		/**
-		 * Request that progress is logged. If this is not specified, progress is only logged at the DEBUG level.
+		 * Request that progress is logged at the INFO level.
+		 * If this is not specified, progress is only logged at the DEBUG level.
 		 * @return this builder
 		 */
 		public Builder doLog() {
@@ -306,7 +306,7 @@ public class StarDist2D implements AutoCloseable {
 		 * @return this builder
 		 */
 		public Builder classificationNames(Map<Integer, String> classifications) {
-			return classifications(classifications.entrySet().stream().collect(Collectors.toMap(e -> e.getKey(), e -> PathClassFactory.getPathClass(e.getValue()))));
+			return classifications(classifications.entrySet().stream().collect(Collectors.toMap(e -> e.getKey(), e -> PathClass.fromString(e.getValue()))));
 		}
 		
 		/**
@@ -339,7 +339,7 @@ public class StarDist2D implements AutoCloseable {
 		
 		/**
 		 * Request that a classification is applied to all created objects.
-		 * This is a convenience method that get a {@link PathClass} from  {@link PathClassFactory}.
+		 * This is a convenience method that get a {@link PathClass} from a String representation.
 		 * 
 		 * @param pathClassName
 		 * @return this builder
@@ -347,7 +347,7 @@ public class StarDist2D implements AutoCloseable {
 		 * @see #classificationNames(Map)
 		 */
 		public Builder classify(String pathClassName) {
-			return classify(PathClassFactory.getPathClass(pathClassName, (Integer)null));
+			return classify(PathClass.fromString(pathClassName, (Integer)null));
 		}
 		
 		/**
@@ -492,7 +492,7 @@ public class StarDist2D implements AutoCloseable {
 		}
 				
 		/**
-		 * Apply percentile normalization to the input image channels.
+		 * Apply percentile normalization separately to the input image channels.
 		 * <p>
 		 * Note that this can be used in combination with {@link #preprocess(ImageOp...)}, 
 		 * in which case the order in which the operations are applied depends upon the order 
@@ -506,9 +506,34 @@ public class StarDist2D implements AutoCloseable {
 		 * @param min minimum percentile
 		 * @param max maximum percentile
 		 * @return this builder
+		 * @see #normalizePercentiles(double, double, boolean, double)
 		 */
 		public Builder normalizePercentiles(double min, double max) {
-			this.ops.add(ImageOps.Normalize.percentile(min, max));
+			return normalizePercentiles(min, max, true, 0.0);
+		}
+		
+		
+		/**
+		 * Apply percentile normalization to the input image channels, or across all channels jointly.
+		 * <p>
+		 * Note that this can be used in combination with {@link #preprocess(ImageOp...)}, 
+		 * in which case the order in which the operations are applied depends upon the order 
+		 * in which the methods of the builder are called.
+		 * <p>
+		 * Warning! This is applied on a per-tile basis. This can result in artifacts and false detections 
+		 * without background/constant regions. 
+		 * Consider using {@link #inputAdd(double...)} and {@link #inputScale(double...)} as alternative 
+		 * normalization strategies, if appropriate constants can be determined to apply globally.
+		 * 
+		 * @param min minimum percentile
+		 * @param max maximum percentile
+		 * @param perChannel if true, normalize each channel separately; if false, normalize channels jointly
+		 * @param eps small constant to apply
+		 * @return this builder
+		 * @since v0.4.0
+		 */
+		public Builder normalizePercentiles(double min, double max, boolean perChannel, double eps) {
+			this.ops.add(ImageOps.Normalize.percentile(min, max, perChannel, eps));
 			return this;
 		}
 		
@@ -522,9 +547,29 @@ public class StarDist2D implements AutoCloseable {
 		 * 
 		 * @param values either a single value to add to all channels, or an array of values equal to the number of channels
 		 * @return this builder
+		 * @see #inputSubtract(double...)
+		 * @see #inputScale(double...)
 		 */
 		public Builder inputAdd(double... values) {
 			this.ops.add(ImageOps.Core.add(values));
+			return this;
+		}
+		
+		/**
+		 * Subtract an offset as a preprocessing step.
+		 * <p>
+		 * Note that this can be used in combination with {@link #preprocess(ImageOp...)}, 
+		 * in which case the order in which the operations are applied depends upon the order 
+		 * in which the methods of the builder are called.
+		 * 
+		 * @param values either a single value to subtract from all channels, or an array of values equal to the number of channels
+		 * @return this builder
+		 * @since v0.4.0
+		 * @see #inputAdd(double...)
+		 * @see #inputScale(double...)
+		 */
+		public Builder inputSubtract(double... values) {
+			this.ops.add(ImageOps.Core.subtract(values));
 			return this;
 		}
 		
@@ -538,6 +583,8 @@ public class StarDist2D implements AutoCloseable {
 		 * 
 		 * @param values either a single value to add to all channels, or an array of values equal to the number of channels
 		 * @return this builder
+		 * @see #inputAdd(double...)
+		 * @see #inputSubtract(double...)
 		 */
 		public Builder inputScale(double... values) {
 			this.ops.add(ImageOps.Core.multiply(values));
@@ -751,8 +798,8 @@ public class StarDist2D implements AutoCloseable {
 			return;
 		}
 		
-		parent.clearPathObjects();
-		parent.addPathObjects(detections);
+		parent.clearChildObjects();
+		parent.addChildObjects(detections);
 		if (fireUpdate)
 			imageData.getHierarchy().fireHierarchyChangedEvent(imageData.getHierarchy(), parent);
 	}
@@ -897,14 +944,13 @@ public class StarDist2D implements AutoCloseable {
 		if (nucleusROI != null) {
 			var nucleus = creator.apply(nucleusROI);
 			nucleus.setPathClass(cell.getPathClass());
-			parent.addPathObject(nucleus);
+			parent.addChildObject(nucleus);
 		}
 		parent.setPathClass(cell.getPathClass());
 		var cellMeasurements = cell.getMeasurementList();
 		if (!cellMeasurements.isEmpty()) {
 			try (var ml = parent.getMeasurementList()) {
-				for (int i = 0; i < cellMeasurements.size(); i++)
-					ml.addMeasurement(cellMeasurements.getMeasurementName(i), cellMeasurements.getMeasurementValue(i));
+				ml.putAll(cellMeasurements);
 			}
 		}
 		return parent;
@@ -954,7 +1000,7 @@ public class StarDist2D implements AutoCloseable {
 			else {
 				pathObject = creatorFun.apply(roiCell);
 				if (roiNucleus != null) {
-					pathObject.addPathObject(creatorFun.apply(roiNucleus));
+					pathObject.addChildObject(creatorFun.apply(roiNucleus));
 				}
 			}
 		} else {
@@ -969,7 +1015,7 @@ public class StarDist2D implements AutoCloseable {
 		}
 		if (includeProbability) {
         	try (var ml = pathObject.getMeasurementList()) {
-        		ml.putMeasurement("Detection probability", nucleus.getProbability());
+        		ml.put("Detection probability", nucleus.getProbability());
         	}
         }
 		
@@ -1093,8 +1139,7 @@ public class StarDist2D implements AutoCloseable {
 //						PathClassFactory.getPathClass("Temporary")
 //						));
 		
-		try (@SuppressWarnings("unchecked")
-		var scope = new PointerScope()) {
+		try (var scope = new PointerScope()) {
 			Mat mat;
 			try {
 				mat = op.apply(imageData, requestPadded);
