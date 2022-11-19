@@ -57,6 +57,8 @@ import org.locationtech.jts.simplify.VWSimplifier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import qupath.ext.stardist.OpCreators.ImageNormalizationBuilder;
+import qupath.ext.stardist.OpCreators.TileOpCreator;
 import qupath.lib.analysis.features.ObjectMeasurements;
 import qupath.lib.analysis.features.ObjectMeasurements.Compartments;
 import qupath.lib.analysis.features.ObjectMeasurements.Measurements;
@@ -145,18 +147,17 @@ public class StarDist2D implements AutoCloseable {
 		
 		private boolean constrainToParent = true;
 		
-		private List<ImageOp> ops = new ArrayList<>();
+		private TileOpCreator globalPreprocessing;
+		private List<ImageOp> preprocessing = new ArrayList<>();
 		
 		private boolean includeProbability = false;
 		
 		private Builder(String modelPath) {
 			this.modelPath = modelPath;
-			this.ops.add(ImageOps.Core.ensureType(PixelType.FLOAT32));
 		}
 		
 		private Builder(DnnModel<?> dnn) {
 			this.dnn = dnn;
-			this.ops.add(ImageOps.Core.ensureType(PixelType.FLOAT32));
 		}
 		
 		/**
@@ -177,9 +178,28 @@ public class StarDist2D implements AutoCloseable {
 		 */
 		public Builder preprocess(ImageOp... ops) {
 			for (var op : ops)
-				this.ops.add(op);
+				this.preprocessing.add(op);
 			return this;
 		}
+		
+		/**
+		 * Add an {@link TileOpCreator} to generate preprocessing operations based upon the 
+		 * entire image, rather than per tile.
+		 * <p>
+		 * Note that only a single such operation is permitted, which is applied after 
+		 * channel extraction but <i>before</i> any other preprocessing.
+		 * <p>
+		 * The intended use is with {@link OpCreators#imageNormalizationBuilder()} to perform 
+		 * normalization based upon percentiles computed across the image, rather than per tile.
+		 * 
+		 * @param global preprocessing operation
+		 * @return this builder
+		 */
+		public Builder preprocess(TileOpCreator global) {
+			this.globalPreprocessing = global;
+			return this;
+		}
+
 		
 		/**
 		 * Request that progress is logged at the INFO level.
@@ -533,9 +553,10 @@ public class StarDist2D implements AutoCloseable {
 		 * @since v0.4.0
 		 */
 		public Builder normalizePercentiles(double min, double max, boolean perChannel, double eps) {
-			this.ops.add(ImageOps.Normalize.percentile(min, max, perChannel, eps));
+			this.preprocessing.add(ImageOps.Normalize.percentile(min, max, perChannel, eps));
 			return this;
 		}
+				
 		
 		/**
 		 * Add an offset as a preprocessing step.
@@ -551,7 +572,7 @@ public class StarDist2D implements AutoCloseable {
 		 * @see #inputScale(double...)
 		 */
 		public Builder inputAdd(double... values) {
-			this.ops.add(ImageOps.Core.add(values));
+			this.preprocessing.add(ImageOps.Core.add(values));
 			return this;
 		}
 		
@@ -569,7 +590,7 @@ public class StarDist2D implements AutoCloseable {
 		 * @see #inputScale(double...)
 		 */
 		public Builder inputSubtract(double... values) {
-			this.ops.add(ImageOps.Core.subtract(values));
+			this.preprocessing.add(ImageOps.Core.subtract(values));
 			return this;
 		}
 		
@@ -587,7 +608,7 @@ public class StarDist2D implements AutoCloseable {
 		 * @see #inputSubtract(double...)
 		 */
 		public Builder inputScale(double... values) {
-			this.ops.add(ImageOps.Core.multiply(values));
+			this.preprocessing.add(ImageOps.Core.multiply(values));
 			return this;
 		}
 		
@@ -599,7 +620,6 @@ public class StarDist2D implements AutoCloseable {
 			var stardist = new StarDist2D();
 			
 //			var padding = pad > 0 ? Padding.symmetric(pad) : Padding.empty();
-			var mergedOps = new ArrayList<>(ops);
 			var dnn = this.dnn;
 			if (dnn == null) {
 				var file = new File(modelPath);
@@ -632,12 +652,11 @@ public class StarDist2D implements AutoCloseable {
 				}
 			}
 			
-//			var mlOp = ImageOps.ML.dnn(dnn, tileWidth, tileHeight, padding);
-//			mergedOps.add(mlOp);
-			mergedOps.add(ImageOps.Core.ensureType(PixelType.FLOAT32));
+			stardist.op = ImageOps.buildImageDataOp(channels);
+					
+			stardist.globalPreprocess = globalPreprocessing;
+			stardist.preprocess = new ArrayList<>(preprocessing);
 			
-			stardist.op = ImageOps.buildImageDataOp(channels)
-					.appendOps(mergedOps.toArray(ImageOp[]::new));
 			stardist.dnn = dnn;
 			stardist.threshold = threshold;
 			stardist.pixelSize = pixelSize;
@@ -677,7 +696,10 @@ public class StarDist2D implements AutoCloseable {
 	private double threshold;
 	
 	private ImageDataOp op;
+	private TileOpCreator globalPreprocess;
+	private List<ImageOp> preprocess;
 	private DnnModel<?> dnn;
+	
 	private double pixelSize;
 	private double cellExpansion;
 	private double cellConstrainScale;
@@ -821,6 +843,8 @@ public class StarDist2D implements AutoCloseable {
 		}
 		int tw = tileWidth <= 0 ? defaultTileSize : tileWidth;
 		int th = tileHeight <= 0 ? defaultTileSize : tileWidth;
+		
+		// The opServer is needed only to get tile requests, or calculate global normalization percentiles
 		var opServer = ImageOps.buildServer(imageData, op, resolution, tw - pad*2, th - pad*2);
 //		var opServer = ImageOps.buildServer(imageData, op, resolution, tileWidth-pad*2, tileHeight-pad*2);
 		
@@ -833,28 +857,48 @@ public class StarDist2D implements AutoCloseable {
 				opServer.getDownsampleForResolution(0),
 				roi);
 
-		var tiles = opServer.getTileRequestManager().getTileRequests(request);
+		// Get all the required tiles that intersect with the mask ROI
 		var mask = roi == null ? null : roi.getGeometry();
+		var tiles = opServer.getTileRequestManager().getTileRequests(request)
+				.stream()
+				.filter(t -> mask == null || mask.intersects(GeometryTools.createRectangle(t.getImageX(), t.getImageY(), t.getImageWidth(), t.getImageHeight())))
+				.collect(Collectors.toList());
 		
-		
-				
 		// Detect all potential nuclei
 		var server = imageData.getServer();
 		var cal = server.getPixelCalibration();
 		double expansion = cellExpansion / cal.getAveragedPixelSize().doubleValue();
-		var plane = roi.getImagePlane();
-//		var detections = tiles.parallelStream()
-//			.flatMap(t -> detectObjectsForTile(op, imageData, t.getRegionRequest(), tiles.size() > 1, mask).stream())
-//			.map(n -> convertToObject(n, plane, expansion, mask))
-//			.collect(Collectors.toList());
+		var plane = request.getImagePlane();
+		
+		// Compute op with preprocessing
+		var fullPreprocess = new ArrayList<ImageOp>();
+		fullPreprocess.add(ImageOps.Core.ensureType(PixelType.FLOAT32));
+		
+		// Do global preprocessing calculations, if required
+		if (globalPreprocess != null) {
+			try {
+				var normalizeOps = globalPreprocess.createOps(op, imageData, roi, request.getImagePlane());
+				fullPreprocess.addAll(normalizeOps);
+			} catch (IOException e) {
+				throw new RuntimeException("Exception computing global normalization", e);
+			}
+		}
+		
+		if (!preprocess.isEmpty()) {
+			fullPreprocess.addAll(preprocess);
+		}
+		if (fullPreprocess.size() > 1)
+			fullPreprocess.add(ImageOps.Core.ensureType(PixelType.FLOAT32));
 
+		var opWithPreprocessing = op.appendOps(fullPreprocess.toArray(ImageOp[]::new));
+
+		// Detect all potential nuclei
 		if (tiles.size() > 1)
 			log("Detecting nuclei for {} tiles", tiles.size());
 		else
 			log("Detecting nuclei");
 		var nuclei = tiles.parallelStream()
-				.filter(t -> mask == null || mask.intersects(GeometryTools.createRectangle(t.getImageX(), t.getImageY(), t.getImageWidth(), t.getImageHeight())))
-				.flatMap(t -> detectObjectsForTile(op, dnn, imageData, t.getRegionRequest(), tiles.size() > 1, mask).stream())
+				.flatMap(t -> detectObjectsForTile(opWithPreprocessing, dnn, imageData, t.getRegionRequest(), tiles.size() > 1, mask).stream())
 				.collect(Collectors.toList());
 		
 		if (cancelRuns)
@@ -926,6 +970,7 @@ public class StarDist2D implements AutoCloseable {
 
 		return detections;
 	}
+	
 	
 	
 	private static PathObject objectToCell(PathObject pathObject) {
@@ -1289,6 +1334,33 @@ public class StarDist2D implements AutoCloseable {
 	
 	
 	/**
+	 * Build a normalization op that can be based upon the entire (2D) image, rather than only local tiles.
+	 * <p>
+	 * Example:
+	 * <pre>
+	 * <code>
+	 *   var builder = StarDist2D.builder()
+	 *   	.preprocess(
+	 *   		StarDist2D.imageNormalizationBuilder()
+	 *   			.percentiles(0, 99.8)
+	 *   			.perChannel(false)
+	 *   			.downsample(10)
+	 *   			.build()
+	 *   	).pixelSize(0.5) // Any other options to customize StarDist2D
+	 *   	.build()
+	 * </code>
+	 * </pre>
+	 * <p>
+	 * Note that currently this requires downsampling the image to a manageable size.
+	 * 
+	 * @return
+	 */
+	public static ImageNormalizationBuilder imageNormalizationBuilder() {
+		return new ImageNormalizationBuilder();
+	}
+	
+	
+	/**
 	 * Create a potential nucleus.
 	 * @param indexerProb probability values
 	 * @param indexerRays ray values
@@ -1496,5 +1568,6 @@ public class StarDist2D implements AutoCloseable {
 		} else if (dnn instanceof AutoCloseable)
 			((AutoCloseable) dnn).close();
 	}
+	
 	
 }
