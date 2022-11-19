@@ -51,7 +51,8 @@ import org.locationtech.jts.geom.Geometry;
 import org.locationtech.jts.geom.GeometryCollection;
 import org.locationtech.jts.geom.Location;
 import org.locationtech.jts.geom.Polygon;
-import org.locationtech.jts.geom.util.GeometryFixer;
+import org.locationtech.jts.geom.prep.PreparedGeometry;
+import org.locationtech.jts.geom.prep.PreparedGeometryFactory;
 import org.locationtech.jts.index.strtree.STRtree;
 import org.locationtech.jts.simplify.VWSimplifier;
 import org.slf4j.Logger;
@@ -1017,17 +1018,14 @@ public class StarDist2D implements AutoCloseable {
 		if (cellExpansion > 0) {
 //			cellExpansion = geomNucleus.getPrecisionModel().makePrecise(cellExpansion);
 //			cellExpansion = Math.round(cellExpansion);
+			// Note that prior to QuPath v0.4.0 an extra fix was needed here
 			var geomCell = CellTools.estimateCellBoundary(geomNucleus, cellExpansion, cellConstrainScale);
-			if (geomCell instanceof GeometryCollection && geomNucleus instanceof Polygon) {
-				if (!geomCell.isValid()) {
-					// Sometimes buffer creates invalid geometries
-					// (Note that the fix should already be applied by estimateCellBoundary in v0.4.0)
-					geomCell = GeometryFixer.fix(geomCell);
-					logger.debug("Used GeometryFixer to fix an invalid cell boundary geometry");
-				}
-			}
 			if (mask != null) {
 				geomCell = GeometryTools.attemptOperation(geomCell, g -> g.intersection(mask));
+				// Fix nucleus overlaps (added v0.4.0)
+				var geomCell2 = geomCell;
+				geomNucleus = GeometryTools.attemptOperation(geomNucleus, g -> g.intersection(geomCell2));
+				geomNucleus = GeometryTools.ensurePolygonal(geomNucleus);
 			}
 			geomCell = simplify(geomCell);
 			
@@ -1036,6 +1034,10 @@ public class StarDist2D implements AutoCloseable {
 			
 			if (geomCell.isEmpty()) {
 				logger.warn("Empty cell boundary at {} will be skipped", nucleus.geometry.getCentroid());
+				return null;
+			}
+			if (geomNucleus.isEmpty()) {
+				logger.warn("Empty nucleus at {} will be skipped", nucleus.geometry.getCentroid());
 				return null;
 			}
 			var roiCell = GeometryTools.geometryToROI(geomCell, plane);
@@ -1051,6 +1053,10 @@ public class StarDist2D implements AutoCloseable {
 		} else {
 			if (mask != null) {
 				geomNucleus = GeometryTools.attemptOperation(geomNucleus, g -> g.intersection(mask));
+				geomNucleus = GeometryTools.ensurePolygonal(geomNucleus);
+				if (geomNucleus.isEmpty()) {
+					return null;
+				}
 			}
 			var roiNucleus = GeometryTools.geometryToROI(geomNucleus, plane);
 			if (creatorFun == null)
@@ -1463,32 +1469,57 @@ public class StarDist2D implements AutoCloseable {
 	    
 	    // Create a spatial cache to find overlaps more quickly
 	    // (Because of later tests, we don't need to update envelopes even though geometries may be modified)
-	    Map<PotentialNucleus, Envelope> envelopes = new HashMap<>();
+	    Map<Geometry, Envelope> envelopes = new HashMap<>();
 	    var tree = new STRtree();
 	    for (var nuc : potentialNuclei) {
 	    	var env = nuc.geometry.getEnvelopeInternal();
-	    	envelopes.put(nuc, env);
+	    	envelopes.put(nuc.geometry, env);
 	    	tree.insert(env, nuc);
 	    }
+	    
+	    var preparingFactory = new PreparedGeometryFactory();
 	    
 	    for (var nucleus : potentialNuclei) {
 	        if (skippedNucleus.contains(nucleus))
 	            continue;
 	        
 	        nuclei.add(nucleus);
-        	var envelope = envelopes.get(nucleus);
+        	var envelope = envelopes.computeIfAbsent(nucleus.geometry, g -> g.getEnvelopeInternal());
         	
         	@SuppressWarnings("unchecked")
 			var overlaps = (List<PotentialNucleus>)tree.query(envelope);
-        	for (var nucleus2 : overlaps) {
+        	
+        	// Remove the overlaps that we can be sure don't apply using quick tests, to avoid expensive ones
+        	var iter = overlaps.iterator();
+        	while (iter.hasNext()) {
+        		var nucleus2 = iter.next();
         		if (nucleus2 == nucleus || skippedNucleus.contains(nucleus2) || nuclei.contains(nucleus2))
-        			continue;
-        		
-            	// If we have an overlap, retain the higher-probability nucleus only (i.e. the one we met first)
+        			iter.remove();
+        		else {
+        			// Envelope text needed because nuclei can have been modified
+	        		var env = envelopes.computeIfAbsent(nucleus2.geometry, g -> g.getEnvelopeInternal());
+	            	if (!envelope.intersects(env))
+	            		iter.remove();
+        		}
+        	}
+        	
+        	// If we need to compare a lot of intersections, preparing the geometry can speed things up
+        	PreparedGeometry prepared = null;
+        	if (overlaps.size() > 5) {
+        		prepared = preparingFactory.create(nucleus.geometry);
+        	}
+        	for (var nucleus2 : overlaps) {
+        		// If we have an overlap, retain the higher-probability nucleus only (i.e. the one we met first)
         		// Try to refine other nuclei
 	            try {
-	            	var env = envelopes.get(nucleus2);
-	                if (envelope.intersects(env) && nucleus.geometry.intersects(nucleus2.geometry)) {
+	            	boolean checkDifference = true;
+	            	if (prepared == null) {
+	            		// We could check for intersection, but it seems faster to just compute difference
+	            		// (this would warrant some more systematic checking though)
+	            		checkDifference = true;//nucleus.geometry.intersects(nucleus2.geometry);
+	            	} else
+	            		checkDifference = prepared.intersects(nucleus2.geometry);
+	                if (checkDifference) {
 	                	// Retain the nucleus only if it is not fragmented, or less than half its original area
 	                    var difference = nucleus2.geometry.difference(nucleus.geometry);
 	                    
