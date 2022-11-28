@@ -1,5 +1,5 @@
 /*-
- * Copyright 2020-2022 QuPath developers,  University of Edinburgh
+ * Copyright 2020-2022 QuPath developers, University of Edinburgh
  * 
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,9 @@ import java.awt.image.BufferedImage;
 import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -81,7 +84,8 @@ import qupath.lib.regions.RegionRequest;
 import qupath.lib.roi.GeometryTools;
 import qupath.lib.roi.interfaces.ROI;
 import qupath.opencv.dnn.DnnModel;
-import qupath.opencv.dnn.DnnTools;
+import qupath.opencv.dnn.DnnModelParams;
+import qupath.opencv.dnn.DnnModels;
 import qupath.opencv.ops.ImageDataOp;
 import qupath.opencv.ops.ImageOp;
 import qupath.opencv.ops.ImageOps;
@@ -106,7 +110,10 @@ public class StarDist2D implements AutoCloseable {
 
 	private static final Logger logger = LoggerFactory.getLogger(StarDist2D.class);
 	
-	private static int defaultTileSize = 1024;
+	/**
+	 * Default tile width and height.
+	 */
+	public static int defaultTileSize = 1024;
 	
 	/**
 	 * Builder to help create a {@link StarDist2D} with custom parameters.
@@ -627,18 +634,19 @@ public class StarDist2D implements AutoCloseable {
 				if (!file.exists()) {
 					throw new IllegalArgumentException("I couldn't find the model file " + file.getAbsolutePath());
 				}
-				if (file.isFile()) {
-					try {
-						dnn = DnnTools.builder(modelPath)
-								.build();
-						logger.debug("Loaded model {} with OpenCV DNN", modelPath);
-					} catch (Exception e) {
-						logger.error("Unable to load model file with OpenCV. If you intended to use TensorFlow, you need to have it on the classpath & provide the "
-								+ "path to the directory, not the .pb file.");
-						logger.error(e.getLocalizedMessage(), e);
-						throw new RuntimeException("Unable to load StarDist model from " + modelPath, e);
-					}
-				} else {
+				try {
+					var params = DnnModelParams.builder()
+							.files(file)
+							.build();
+					dnn = DnnModels.buildModel(params);
+					if (dnn != null)
+						logger.debug("Loaded model {} as {}", modelPath, dnn);
+				} catch (Exception e) {
+					logger.error("Unable to load model file: " + e.getLocalizedMessage(), e);
+					throw new RuntimeException("Unable to load StarDist model from " + modelPath, e);
+				}
+				// Try using legacy TensorFlow approach
+				if (dnn == null) {
 					try {
 						// For backwards compatibility, we try to support TensorFlow if the extension is installed
 						var clsTF = Class.forName("qupath.ext.tensorflow.TensorFlowTools");
@@ -1323,8 +1331,44 @@ public class StarDist2D implements AutoCloseable {
 	 * @return
 	 */
 	public static Builder builder(String modelPath) {
-		return new Builder(modelPath);
+		var builder = maybeCreateBioimageIoBuilder(modelPath);
+		if (builder == null)
+			return new Builder(modelPath);
+		else {
+			return builder;
+		}
 	}
+	
+	
+	/**
+	 * Maybe initialize the builder from a BioimageIO model spec... if we can
+	 * @param path
+	 * @return
+	 */
+	private static Builder maybeCreateBioimageIoBuilder(String path) {
+		var p = Paths.get(path);
+		if (!Files.exists(p))
+			return null;
+		try {
+			if (isYamlFile(p) || (Files.isDirectory(p) && Files.list(p).anyMatch(StarDist2D::isYamlFile))) {
+				return StarDistBioimageIo.parseModel(p);
+			}
+		} catch (IOException e) {
+			logger.debug("Exception attempting to parse BioimageIOSpec: " + e.getLocalizedMessage(), e);
+		} catch (UnsatisfiedLinkError e) {
+			logger.debug("Unable to parse BioimageIOSpec: " + e.getLocalizedMessage(), e);				
+		}
+		return null;
+	}
+	
+	private static boolean isYamlFile(Path path) {
+		if (Files.isRegularFile(path)) {
+			var name = path.getFileName().toString().toLowerCase();
+			return name.endsWith(".yml") || name.endsWith(".yaml");
+		}
+		return false;
+	}
+	
 	
 	
 	/**

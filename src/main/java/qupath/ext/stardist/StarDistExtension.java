@@ -1,5 +1,5 @@
 /*-
- * Copyright 2020-2021 QuPath developers,  University of Edinburgh
+ * Copyright 2020-2021 QuPath developers, University of Edinburgh
  * 
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -51,7 +51,7 @@ public class StarDistExtension implements QuPathExtension, GitHubProject {
 	
 	@Override
 	public Version getQuPathVersion() {
-		return Version.parse("0.3.0");
+		return Version.parse("0.4.0-SNAPSHOT");
 	}
 
 	@Override
