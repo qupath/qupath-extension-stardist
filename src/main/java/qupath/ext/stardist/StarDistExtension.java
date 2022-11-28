@@ -16,10 +16,22 @@
 
 package qupath.ext.stardist;
 
+import java.io.IOException;
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.util.Arrays;
+
+import org.controlsfx.control.action.Action;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import qupath.lib.common.Version;
 import qupath.lib.gui.QuPathGUI;
 import qupath.lib.gui.extensions.GitHubProject;
 import qupath.lib.gui.extensions.QuPathExtension;
+import qupath.lib.gui.tools.MenuTools;
 
 /**
  * Install StarDist as an extension.
@@ -33,9 +45,33 @@ import qupath.lib.gui.extensions.QuPathExtension;
  */
 public class StarDistExtension implements QuPathExtension, GitHubProject {
 
+	private static final Logger logger = LoggerFactory.getLogger(StarDistExtension.class);
+	
+	private boolean isInstalled = false;
+	
 	@Override
 	public void installExtension(QuPathGUI qupath) {
+		if (isInstalled)
+			return;
+		
 		// Does nothing
+		for (var name : Arrays.asList("scripts/StarDistTemplate.groovy")) {
+			try {
+				var url = StarDist2D.class.getClassLoader().getResource(name);
+				if (url == null) {
+					logger.warn("Unable to find script URL for {}", name);
+					continue;
+				}
+				var uri = url.toURI();
+				if (uri != null) {
+					MenuTools.addMenuItems(
+			                qupath.getMenu("Extensions>StarDist", true),
+			                new Action("Open StarDist2D script template", e -> openScript(qupath, uri)));
+				}
+			} catch (URISyntaxException e) {
+				logger.error(e.getLocalizedMessage(), e);
+			}
+		}
 	}
 
 	@Override
@@ -58,5 +94,21 @@ public class StarDistExtension implements QuPathExtension, GitHubProject {
 	public GitHubRepo getRepository() {
 		return GitHubRepo.create(getName(), "qupath", "qupath-extension-stardist");
 	}
+	
+	
+	private static void openScript(QuPathGUI qupath, URI uri) {
+		var editor = qupath.getScriptEditor();
+		if (editor == null) {
+			logger.error("No script editor is available!");
+			return;
+		}
+		try {
+			var script = Files.readString(Paths.get(uri));
+			qupath.getScriptEditor().showScript("StarDist detection", script);
+		} catch (IOException e) {
+			logger.error("Unable to open script: " + e.getLocalizedMessage(), e);
+		}
+	}
+	
 
 }
