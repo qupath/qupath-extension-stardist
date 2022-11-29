@@ -21,7 +21,7 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
-import java.util.Arrays;
+import java.util.Map;
 
 import org.controlsfx.control.action.Action;
 import org.slf4j.Logger;
@@ -49,24 +49,33 @@ public class StarDistExtension implements QuPathExtension, GitHubProject {
 	
 	private boolean isInstalled = false;
 	
+	private static final Map<String, String> SCRIPTS = Map.of(
+			"StarDist H&E nucleus detection script", "scripts/StarDistHE.groovy",
+			"StarDist brightfield cell detection script", "scripts/StarDistDeconvolved.groovy",
+			"StarDist fluorescence cell detection script", "scripts/StarDistFluorescence.groovy",
+			"StarDist full cell detection script", "scripts/StarDistTemplate.groovy"
+			);
+	
 	@Override
 	public void installExtension(QuPathGUI qupath) {
 		if (isInstalled)
 			return;
 		
 		// Does nothing
-		for (var name : Arrays.asList("scripts/StarDistTemplate.groovy")) {
+		for (var entry : SCRIPTS.entrySet()) {
 			try {
-				var url = StarDist2D.class.getClassLoader().getResource(name);
+				var script = entry.getValue();
+				var command = entry.getKey();
+				var url = StarDist2D.class.getClassLoader().getResource(script);
 				if (url == null) {
-					logger.warn("Unable to find script URL for {}", name);
+					logger.warn("Unable to find script URL for {}", script);
 					continue;
 				}
 				var uri = url.toURI();
 				if (uri != null) {
 					MenuTools.addMenuItems(
 			                qupath.getMenu("Extensions>StarDist", true),
-			                new Action("Open StarDist2D script template", e -> openScript(qupath, uri)));
+			                new Action(command, e -> openScript(qupath, uri)));
 				}
 			} catch (URISyntaxException e) {
 				logger.error(e.getLocalizedMessage(), e);

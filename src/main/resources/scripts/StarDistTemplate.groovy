@@ -5,7 +5,8 @@
  *  - the original StarDist paper (https://doi.org/10.48550/arXiv.1806.03535)
  *  - the original QuPath paper (https://doi.org/10.1038/s41598-017-17204-5)
  *  
- * There are lots of options to customize the detection.
+ * There are lots of options to customize the detection - and this script shows most of them.
+ * 
  * Please read what each option means, then remove the ones you don't want - 
  * and adjust the ones that you care about.
  */
@@ -25,14 +26,14 @@ def modelPath = "/path/to/model.pb"
 def stardist = StarDist2D
     .builder(modelPath)
     .preprocess(                 // Apply normalization, calculating values across the whole image
-		StarDist2D.imageNormalizationBuilder()
-			.maxDimension(4096)    // Figure out how much to downsample large images to make sure the width & height are <= this value
-//			.downsample(1)         // Optional alternative to maxDimension to use the full-resolution image for normalization
-			                       // (this is a good idea for small images, but a very bad idea for large images)
-			.percentiles(0, 99.8)  // Calculate image percentiles to use for normalization
-			.build()
+        StarDist2D.imageNormalizationBuilder()
+            .maxDimension(4096)    // Figure out how much to downsample large images to make sure the width & height are <= this value
+//          .downsample(1)         // Optional alternative to maxDimension to use the full-resolution image for normalization
+                                   // (this is a good idea for small images, but a very bad idea for large images)
+            .percentiles(0, 99.8)  // Calculate image percentiles to use for normalization
+            .build()
 		)
-//	.channels('DAPI')            // Select detection channel (usually useful for fluorescence, not needed for RGB);
+//    .channels('DAPI')            // Select detection channel (usually useful for fluorescence, not needed for RGB);
                                  // the channel can be selected by name or index/number (where 0 is the first channel)
     .threshold(0.5)              // Probability (detection) threshold
     .pixelSize(0.5)              // Resolution for detection
@@ -62,4 +63,5 @@ if (pathObjects.isEmpty()) {
     return
 }
 stardist.detectObjects(imageData, pathObjects)
+stardist.close() // This can help clean up & regain memory
 println('Done!')
