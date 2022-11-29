@@ -1,48 +1,29 @@
 plugins {
   id 'java-library'
-  // To create a shadow/fat jar, including dependencies
-  id 'com.github.johnrengelman.shadow' version '7.0.0'
+  id 'maven-publish'
   // To manage included native libraries
-  id 'org.bytedeco.gradle-javacpp-platform' version '1.5.7'
-}
-
-repositories {
-  // Use this only for local development!
-//  mavenLocal()
-
-  mavenCentral()
-  
-  maven {
-    url "https://maven.scijava.org/content/repositories/releases"
-  }
-  
-  maven {
-    url "https://maven.scijava.org/content/repositories/snapshots"
-  }
-  
+  alias(libs.plugins.javacpp)
 }
 
 ext.moduleName = 'qupath.extension.stardist'
+ext.qupathVersion = gradle.ext.qupathVersion
 
 description = 'QuPath extension to use StarDist'
 
-version = "0.3.2"
+version = "0.4.0-SNAPSHOT"
 
 dependencies {
-    def qupathVersion = "0.3.0" // For now
+    implementation "io.github.qupath:qupath-gui-fx:${qupathVersion}"
+	implementation libs.bundles.logging    
     
-    shadow "io.github.qupath:qupath-gui-fx:${qupathVersion}"
-    shadow "org.slf4j:slf4j-api:1.7.30"
-    
-    testImplementation "io.github.qupath:qupath-gui-fx:${qupathVersion}"
-    testImplementation "org.junit.jupiter:junit-jupiter-api:5.7.2"
-    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine'
+    testImplementation libs.junit
+    testRuntimeOnly libs.junit.engine
     
 }
 
 processResources {
-  from ("${projectDir}/LICENSE.txt") {
-    into 'licenses/'
+  from ("${projectDir}/LICENSE") {
+    into 'META-INF/licenses/'
   }
 }
 
@@ -68,6 +49,17 @@ java {
 }
 
 /*
+ * Manifest info
+ */
+jar {
+	manifest {
+		attributes("Implementation-Title": project.name,
+				   "Implementation-Version": archiveVersion,
+				   "Automatic-Module-Name": "io.github." + moduleName)
+	}
+}
+
+/*
  * Create javadocs for all modules/packages in one place.
  * Use -PstrictJavadoc=true to fail on error with doclint (which is rather strict).
  */
@@ -88,4 +80,36 @@ tasks.withType(org.gradle.jvm.tasks.Jar) {
 
 tasks.named('test') {
     useJUnitPlatform()
+}
+
+publishing {
+	repositories {
+		maven {
+			name = "SciJava"
+			def releasesRepoUrl = uri("https://maven.scijava.org/content/repositories/releases")
+			def snapshotsRepoUrl = uri("https://maven.scijava.org/content/repositories/snapshots")
+			// Use gradle -Prelease publish
+			url = project.hasProperty('release') ? releasesRepoUrl : snapshotsRepoUrl
+			credentials {
+				username = System.getenv("MAVEN_USER")
+				password = System.getenv("MAVEN_PASS")
+			}
+		}
+	}
+
+	publications {
+		mavenJava(MavenPublication) {
+			groupId = 'io.github.qupath'
+			from components.java
+
+			pom {
+				licenses {
+					license {
+						name = 'Apache License v2.0'
+						url = 'http://www.apache.org/licenses/LICENSE-2.0'
+					}
+				}
+			}
+		}
+	}
 }

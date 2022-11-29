@@ -1,5 +1,5 @@
 /*-
- * Copyright 2020-2021 QuPath developers,  University of Edinburgh
+ * Copyright 2020-2021 QuPath developers, University of Edinburgh
  * 
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,10 +16,22 @@
 
 package qupath.ext.stardist;
 
+import java.io.IOException;
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.util.Map;
+
+import org.controlsfx.control.action.Action;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import qupath.lib.common.Version;
 import qupath.lib.gui.QuPathGUI;
 import qupath.lib.gui.extensions.GitHubProject;
 import qupath.lib.gui.extensions.QuPathExtension;
+import qupath.lib.gui.tools.MenuTools;
 
 /**
  * Install StarDist as an extension.
@@ -33,9 +45,42 @@ import qupath.lib.gui.extensions.QuPathExtension;
  */
 public class StarDistExtension implements QuPathExtension, GitHubProject {
 
+	private static final Logger logger = LoggerFactory.getLogger(StarDistExtension.class);
+	
+	private boolean isInstalled = false;
+	
+	private static final Map<String, String> SCRIPTS = Map.of(
+			"StarDist H&E nucleus detection script", "scripts/StarDistHE.groovy",
+			"StarDist brightfield cell detection script", "scripts/StarDistDeconvolved.groovy",
+			"StarDist fluorescence cell detection script", "scripts/StarDistFluorescence.groovy",
+			"StarDist full cell detection script", "scripts/StarDistTemplate.groovy"
+			);
+	
 	@Override
 	public void installExtension(QuPathGUI qupath) {
+		if (isInstalled)
+			return;
+		
 		// Does nothing
+		for (var entry : SCRIPTS.entrySet()) {
+			try {
+				var script = entry.getValue();
+				var command = entry.getKey();
+				var url = StarDist2D.class.getClassLoader().getResource(script);
+				if (url == null) {
+					logger.warn("Unable to find script URL for {}", script);
+					continue;
+				}
+				var uri = url.toURI();
+				if (uri != null) {
+					MenuTools.addMenuItems(
+			                qupath.getMenu("Extensions>StarDist", true),
+			                new Action(command, e -> openScript(qupath, uri)));
+				}
+			} catch (URISyntaxException e) {
+				logger.error(e.getLocalizedMessage(), e);
+			}
+		}
 	}
 
 	@Override
@@ -51,12 +96,28 @@ public class StarDistExtension implements QuPathExtension, GitHubProject {
 	
 	@Override
 	public Version getQuPathVersion() {
-		return Version.parse("0.3.0");
+		return Version.parse("0.4.0-SNAPSHOT");
 	}
 
 	@Override
 	public GitHubRepo getRepository() {
 		return GitHubRepo.create(getName(), "qupath", "qupath-extension-stardist");
 	}
+	
+	
+	private static void openScript(QuPathGUI qupath, URI uri) {
+		var editor = qupath.getScriptEditor();
+		if (editor == null) {
+			logger.error("No script editor is available!");
+			return;
+		}
+		try {
+			var script = Files.readString(Paths.get(uri));
+			qupath.getScriptEditor().showScript("StarDist detection", script);
+		} catch (IOException e) {
+			logger.error("Unable to open script: " + e.getLocalizedMessage(), e);
+		}
+	}
+	
 
 }

@@ -1,5 +1,5 @@
 /*-
- * Copyright 2020-2021 QuPath developers,  University of Edinburgh
+ * Copyright 2020-2022 QuPath developers, University of Edinburgh
  * 
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,9 @@ import java.awt.image.BufferedImage;
 import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -51,12 +54,15 @@ import org.locationtech.jts.geom.Geometry;
 import org.locationtech.jts.geom.GeometryCollection;
 import org.locationtech.jts.geom.Location;
 import org.locationtech.jts.geom.Polygon;
-import org.locationtech.jts.geom.util.GeometryFixer;
+import org.locationtech.jts.geom.prep.PreparedGeometry;
+import org.locationtech.jts.geom.prep.PreparedGeometryFactory;
 import org.locationtech.jts.index.strtree.STRtree;
 import org.locationtech.jts.simplify.VWSimplifier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import qupath.ext.stardist.OpCreators.ImageNormalizationBuilder;
+import qupath.ext.stardist.OpCreators.TileOpCreator;
 import qupath.lib.analysis.features.ObjectMeasurements;
 import qupath.lib.analysis.features.ObjectMeasurements.Compartments;
 import qupath.lib.analysis.features.ObjectMeasurements.Measurements;
@@ -72,14 +78,14 @@ import qupath.lib.objects.PathCellObject;
 import qupath.lib.objects.PathObject;
 import qupath.lib.objects.PathObjects;
 import qupath.lib.objects.classes.PathClass;
-import qupath.lib.objects.classes.PathClassFactory;
 import qupath.lib.regions.ImagePlane;
 import qupath.lib.regions.Padding;
 import qupath.lib.regions.RegionRequest;
 import qupath.lib.roi.GeometryTools;
 import qupath.lib.roi.interfaces.ROI;
 import qupath.opencv.dnn.DnnModel;
-import qupath.opencv.dnn.DnnTools;
+import qupath.opencv.dnn.DnnModelParams;
+import qupath.opencv.dnn.DnnModels;
 import qupath.opencv.ops.ImageDataOp;
 import qupath.opencv.ops.ImageOp;
 import qupath.opencv.ops.ImageOps;
@@ -96,7 +102,7 @@ import qupath.opencv.ops.ImageOps;
  * Very much inspired by stardist-imagej at https://github.com/mpicbg-csbd/stardist-imagej but re-written from scratch to use OpenCV and 
  * adapt the method of converting predictions to contours (very slightly) to be more QuPath-friendly.
  * <p>
- * Models are expected in the same format as required by the Fiji plugin.
+ * Models are expected in the same format as required by the Fiji plugin, or converted to a frozen .pb file for use with OpenCV.
  * 
  * @author Pete Bankhead (this implementation, but based on the others)
  */
@@ -104,7 +110,10 @@ public class StarDist2D implements AutoCloseable {
 
 	private static final Logger logger = LoggerFactory.getLogger(StarDist2D.class);
 	
-	private static int defaultTileSize = 1024;
+	/**
+	 * Default tile width and height.
+	 */
+	public static int defaultTileSize = 1024;
 	
 	/**
 	 * Builder to help create a {@link StarDist2D} with custom parameters.
@@ -133,6 +142,9 @@ public class StarDist2D implements AutoCloseable {
 		private int tileWidth = -1;
 		private int tileHeight = -1;
 		
+		// Optional layout string, following the bioimage.io spec
+		private String layout;
+		
 		private Function<ROI, PathObject> creatorFun;
 		
 		private PathClass globalPathClass;
@@ -146,18 +158,17 @@ public class StarDist2D implements AutoCloseable {
 		
 		private boolean constrainToParent = true;
 		
-		private List<ImageOp> ops = new ArrayList<>();
+		private TileOpCreator globalPreprocessing;
+		private List<ImageOp> preprocessing = new ArrayList<>();
 		
 		private boolean includeProbability = false;
 		
 		private Builder(String modelPath) {
 			this.modelPath = modelPath;
-			this.ops.add(ImageOps.Core.ensureType(PixelType.FLOAT32));
 		}
 		
 		private Builder(DnnModel<?> dnn) {
 			this.dnn = dnn;
-			this.ops.add(ImageOps.Core.ensureType(PixelType.FLOAT32));
 		}
 		
 		/**
@@ -178,16 +189,56 @@ public class StarDist2D implements AutoCloseable {
 		 */
 		public Builder preprocess(ImageOp... ops) {
 			for (var op : ops)
-				this.ops.add(op);
+				this.preprocessing.add(op);
 			return this;
 		}
 		
 		/**
-		 * Request that progress is logged. If this is not specified, progress is only logged at the DEBUG level.
+		 * Add an {@link TileOpCreator} to generate preprocessing operations based upon the 
+		 * entire image, rather than per tile.
+		 * <p>
+		 * Note that only a single such operation is permitted, which is applied after 
+		 * channel extraction but <i>before</i> any other preprocessing.
+		 * <p>
+		 * The intended use is with {@link OpCreators#imageNormalizationBuilder()} to perform 
+		 * normalization based upon percentiles computed across the image, rather than per tile.
+		 * 
+		 * @param global preprocessing operation
+		 * @return this builder
+		 */
+		public Builder preprocess(TileOpCreator global) {
+			this.globalPreprocessing = global;
+			return this;
+		}
+
+		
+		/**
+		 * Request that progress is logged at the INFO level.
+		 * If this is not specified, progress is only logged at the DEBUG level.
 		 * @return this builder
 		 */
 		public Builder doLog() {
 			this.doLog = true;
+			return this;
+		}
+		
+		
+		/**
+		 * Optional layout string giving the axes of the input required 
+		 * by the model, following the Bioimage Model Zoo spec for axes.
+		 * <p>
+		 * Generally it should be possible to leave this unspecified, 
+		 * but the option exists for cases where the model format might be 
+		 * different from what is expected.
+		 * <p>
+		 * An example string would be {@code "yxc"} indicating channels-last,
+		 * or {@code "byxc"} indicating that a batch index is required.
+		 * 
+		 * @param layout
+		 * @return
+		 */
+		public Builder layout(String layout) {
+			this.layout = layout;
 			return this;
 		}
 		
@@ -306,7 +357,7 @@ public class StarDist2D implements AutoCloseable {
 		 * @return this builder
 		 */
 		public Builder classificationNames(Map<Integer, String> classifications) {
-			return classifications(classifications.entrySet().stream().collect(Collectors.toMap(e -> e.getKey(), e -> PathClassFactory.getPathClass(e.getValue()))));
+			return classifications(classifications.entrySet().stream().collect(Collectors.toMap(e -> e.getKey(), e -> PathClass.fromString(e.getValue()))));
 		}
 		
 		/**
@@ -339,7 +390,7 @@ public class StarDist2D implements AutoCloseable {
 		
 		/**
 		 * Request that a classification is applied to all created objects.
-		 * This is a convenience method that get a {@link PathClass} from  {@link PathClassFactory}.
+		 * This is a convenience method that get a {@link PathClass} from a String representation.
 		 * 
 		 * @param pathClassName
 		 * @return this builder
@@ -347,7 +398,7 @@ public class StarDist2D implements AutoCloseable {
 		 * @see #classificationNames(Map)
 		 */
 		public Builder classify(String pathClassName) {
-			return classify(PathClassFactory.getPathClass(pathClassName, (Integer)null));
+			return classify(PathClass.fromString(pathClassName, (Integer)null));
 		}
 		
 		/**
@@ -492,7 +543,7 @@ public class StarDist2D implements AutoCloseable {
 		}
 				
 		/**
-		 * Apply percentile normalization to the input image channels.
+		 * Apply percentile normalization separately to the input image channels.
 		 * <p>
 		 * Note that this can be used in combination with {@link #preprocess(ImageOp...)}, 
 		 * in which case the order in which the operations are applied depends upon the order 
@@ -506,11 +557,37 @@ public class StarDist2D implements AutoCloseable {
 		 * @param min minimum percentile
 		 * @param max maximum percentile
 		 * @return this builder
+		 * @see #normalizePercentiles(double, double, boolean, double)
 		 */
 		public Builder normalizePercentiles(double min, double max) {
-			this.ops.add(ImageOps.Normalize.percentile(min, max));
+			return normalizePercentiles(min, max, true, 0.0);
+		}
+		
+		
+		/**
+		 * Apply percentile normalization to the input image channels, or across all channels jointly.
+		 * <p>
+		 * Note that this can be used in combination with {@link #preprocess(ImageOp...)}, 
+		 * in which case the order in which the operations are applied depends upon the order 
+		 * in which the methods of the builder are called.
+		 * <p>
+		 * Warning! This is applied on a per-tile basis. This can result in artifacts and false detections 
+		 * without background/constant regions. 
+		 * Consider using {@link #inputAdd(double...)} and {@link #inputScale(double...)} as alternative 
+		 * normalization strategies, if appropriate constants can be determined to apply globally.
+		 * 
+		 * @param min minimum percentile
+		 * @param max maximum percentile
+		 * @param perChannel if true, normalize each channel separately; if false, normalize channels jointly
+		 * @param eps small constant to apply
+		 * @return this builder
+		 * @since v0.4.0
+		 */
+		public Builder normalizePercentiles(double min, double max, boolean perChannel, double eps) {
+			this.preprocessing.add(ImageOps.Normalize.percentile(min, max, perChannel, eps));
 			return this;
 		}
+				
 		
 		/**
 		 * Add an offset as a preprocessing step.
@@ -522,9 +599,29 @@ public class StarDist2D implements AutoCloseable {
 		 * 
 		 * @param values either a single value to add to all channels, or an array of values equal to the number of channels
 		 * @return this builder
+		 * @see #inputSubtract(double...)
+		 * @see #inputScale(double...)
 		 */
 		public Builder inputAdd(double... values) {
-			this.ops.add(ImageOps.Core.add(values));
+			this.preprocessing.add(ImageOps.Core.add(values));
+			return this;
+		}
+		
+		/**
+		 * Subtract an offset as a preprocessing step.
+		 * <p>
+		 * Note that this can be used in combination with {@link #preprocess(ImageOp...)}, 
+		 * in which case the order in which the operations are applied depends upon the order 
+		 * in which the methods of the builder are called.
+		 * 
+		 * @param values either a single value to subtract from all channels, or an array of values equal to the number of channels
+		 * @return this builder
+		 * @since v0.4.0
+		 * @see #inputAdd(double...)
+		 * @see #inputScale(double...)
+		 */
+		public Builder inputSubtract(double... values) {
+			this.preprocessing.add(ImageOps.Core.subtract(values));
 			return this;
 		}
 		
@@ -538,9 +635,11 @@ public class StarDist2D implements AutoCloseable {
 		 * 
 		 * @param values either a single value to add to all channels, or an array of values equal to the number of channels
 		 * @return this builder
+		 * @see #inputAdd(double...)
+		 * @see #inputSubtract(double...)
 		 */
 		public Builder inputScale(double... values) {
-			this.ops.add(ImageOps.Core.multiply(values));
+			this.preprocessing.add(ImageOps.Core.multiply(values));
 			return this;
 		}
 		
@@ -552,25 +651,26 @@ public class StarDist2D implements AutoCloseable {
 			var stardist = new StarDist2D();
 			
 //			var padding = pad > 0 ? Padding.symmetric(pad) : Padding.empty();
-			var mergedOps = new ArrayList<>(ops);
 			var dnn = this.dnn;
 			if (dnn == null) {
 				var file = new File(modelPath);
 				if (!file.exists()) {
 					throw new IllegalArgumentException("I couldn't find the model file " + file.getAbsolutePath());
 				}
-				if (file.isFile()) {
-					try {
-						dnn = DnnTools.builder(modelPath)
-								.build();
-						logger.debug("Loaded model {} with OpenCV DNN", modelPath);
-					} catch (Exception e) {
-						logger.error("Unable to load model file with OpenCV. If you intended to use TensorFlow, you need to have it on the classpath & provide the "
-								+ "path to the directory, not the .pb file.");
-						logger.error(e.getLocalizedMessage(), e);
-						throw new RuntimeException("Unable to load StarDist model from " + modelPath, e);
-					}
-				} else {
+				try {
+					var params = DnnModelParams.builder()
+							.files(file)
+							.layout(layout)
+							.build();
+					dnn = DnnModels.buildModel(params);
+					if (dnn != null)
+						logger.debug("Loaded model {} as {}", modelPath, dnn);
+				} catch (Exception e) {
+					logger.error("Unable to load model file: " + e.getLocalizedMessage(), e);
+					throw new RuntimeException("Unable to load StarDist model from " + modelPath, e);
+				}
+				// Try using legacy TensorFlow approach
+				if (dnn == null) {
 					try {
 						// For backwards compatibility, we try to support TensorFlow if the extension is installed
 						var clsTF = Class.forName("qupath.ext.tensorflow.TensorFlowTools");
@@ -585,12 +685,11 @@ public class StarDist2D implements AutoCloseable {
 				}
 			}
 			
-//			var mlOp = ImageOps.ML.dnn(dnn, tileWidth, tileHeight, padding);
-//			mergedOps.add(mlOp);
-			mergedOps.add(ImageOps.Core.ensureType(PixelType.FLOAT32));
+			stardist.op = ImageOps.buildImageDataOp(channels);
+					
+			stardist.globalPreprocess = globalPreprocessing;
+			stardist.preprocess = new ArrayList<>(preprocessing);
 			
-			stardist.op = ImageOps.buildImageDataOp(channels)
-					.appendOps(mergedOps.toArray(ImageOp[]::new));
 			stardist.dnn = dnn;
 			stardist.threshold = threshold;
 			stardist.pixelSize = pixelSize;
@@ -630,7 +729,10 @@ public class StarDist2D implements AutoCloseable {
 	private double threshold;
 	
 	private ImageDataOp op;
+	private TileOpCreator globalPreprocess;
+	private List<ImageOp> preprocess;
 	private DnnModel<?> dnn;
+	
 	private double pixelSize;
 	private double cellExpansion;
 	private double cellConstrainScale;
@@ -751,8 +853,8 @@ public class StarDist2D implements AutoCloseable {
 			return;
 		}
 		
-		parent.clearPathObjects();
-		parent.addPathObjects(detections);
+		parent.clearChildObjects();
+		parent.addChildObjects(detections);
 		if (fireUpdate)
 			imageData.getHierarchy().fireHierarchyChangedEvent(imageData.getHierarchy(), parent);
 	}
@@ -774,6 +876,8 @@ public class StarDist2D implements AutoCloseable {
 		}
 		int tw = tileWidth <= 0 ? defaultTileSize : tileWidth;
 		int th = tileHeight <= 0 ? defaultTileSize : tileWidth;
+		
+		// The opServer is needed only to get tile requests, or calculate global normalization percentiles
 		var opServer = ImageOps.buildServer(imageData, op, resolution, tw - pad*2, th - pad*2);
 //		var opServer = ImageOps.buildServer(imageData, op, resolution, tileWidth-pad*2, tileHeight-pad*2);
 		
@@ -786,28 +890,48 @@ public class StarDist2D implements AutoCloseable {
 				opServer.getDownsampleForResolution(0),
 				roi);
 
-		var tiles = opServer.getTileRequestManager().getTileRequests(request);
+		// Get all the required tiles that intersect with the mask ROI
 		var mask = roi == null ? null : roi.getGeometry();
+		var tiles = opServer.getTileRequestManager().getTileRequests(request)
+				.stream()
+				.filter(t -> mask == null || mask.intersects(GeometryTools.createRectangle(t.getImageX(), t.getImageY(), t.getImageWidth(), t.getImageHeight())))
+				.collect(Collectors.toList());
 		
-		
-				
 		// Detect all potential nuclei
 		var server = imageData.getServer();
 		var cal = server.getPixelCalibration();
 		double expansion = cellExpansion / cal.getAveragedPixelSize().doubleValue();
-		var plane = roi.getImagePlane();
-//		var detections = tiles.parallelStream()
-//			.flatMap(t -> detectObjectsForTile(op, imageData, t.getRegionRequest(), tiles.size() > 1, mask).stream())
-//			.map(n -> convertToObject(n, plane, expansion, mask))
-//			.collect(Collectors.toList());
+		var plane = request.getImagePlane();
+		
+		// Compute op with preprocessing
+		var fullPreprocess = new ArrayList<ImageOp>();
+		fullPreprocess.add(ImageOps.Core.ensureType(PixelType.FLOAT32));
+		
+		// Do global preprocessing calculations, if required
+		if (globalPreprocess != null) {
+			try {
+				var normalizeOps = globalPreprocess.createOps(op, imageData, roi, request.getImagePlane());
+				fullPreprocess.addAll(normalizeOps);
+			} catch (IOException e) {
+				throw new RuntimeException("Exception computing global normalization", e);
+			}
+		}
+		
+		if (!preprocess.isEmpty()) {
+			fullPreprocess.addAll(preprocess);
+		}
+		if (fullPreprocess.size() > 1)
+			fullPreprocess.add(ImageOps.Core.ensureType(PixelType.FLOAT32));
 
+		var opWithPreprocessing = op.appendOps(fullPreprocess.toArray(ImageOp[]::new));
+
+		// Detect all potential nuclei
 		if (tiles.size() > 1)
 			log("Detecting nuclei for {} tiles", tiles.size());
 		else
 			log("Detecting nuclei");
 		var nuclei = tiles.parallelStream()
-				.filter(t -> mask == null || mask.intersects(GeometryTools.createRectangle(t.getImageX(), t.getImageY(), t.getImageWidth(), t.getImageHeight())))
-				.flatMap(t -> detectObjectsForTile(op, dnn, imageData, t.getRegionRequest(), tiles.size() > 1, mask).stream())
+				.flatMap(t -> detectObjectsForTile(opWithPreprocessing, dnn, imageData, t.getRegionRequest(), tiles.size() > 1, mask).stream())
 				.collect(Collectors.toList());
 		
 		if (cancelRuns)
@@ -881,6 +1005,7 @@ public class StarDist2D implements AutoCloseable {
 	}
 	
 	
+	
 	private static PathObject objectToCell(PathObject pathObject) {
 		ROI roiNucleus = null;
 		var children = pathObject.getChildObjects();
@@ -897,14 +1022,13 @@ public class StarDist2D implements AutoCloseable {
 		if (nucleusROI != null) {
 			var nucleus = creator.apply(nucleusROI);
 			nucleus.setPathClass(cell.getPathClass());
-			parent.addPathObject(nucleus);
+			parent.addChildObject(nucleus);
 		}
 		parent.setPathClass(cell.getPathClass());
 		var cellMeasurements = cell.getMeasurementList();
 		if (!cellMeasurements.isEmpty()) {
 			try (var ml = parent.getMeasurementList()) {
-				for (int i = 0; i < cellMeasurements.size(); i++)
-					ml.addMeasurement(cellMeasurements.getMeasurementName(i), cellMeasurements.getMeasurementValue(i));
+				ml.putAll(cellMeasurements);
 			}
 		}
 		return parent;
@@ -926,17 +1050,14 @@ public class StarDist2D implements AutoCloseable {
 		if (cellExpansion > 0) {
 //			cellExpansion = geomNucleus.getPrecisionModel().makePrecise(cellExpansion);
 //			cellExpansion = Math.round(cellExpansion);
+			// Note that prior to QuPath v0.4.0 an extra fix was needed here
 			var geomCell = CellTools.estimateCellBoundary(geomNucleus, cellExpansion, cellConstrainScale);
-			if (geomCell instanceof GeometryCollection && geomNucleus instanceof Polygon) {
-				if (!geomCell.isValid()) {
-					// Sometimes buffer creates invalid geometries
-					// (Note that the fix should already be applied by estimateCellBoundary in v0.4.0)
-					geomCell = GeometryFixer.fix(geomCell);
-					logger.debug("Used GeometryFixer to fix an invalid cell boundary geometry");
-				}
-			}
 			if (mask != null) {
 				geomCell = GeometryTools.attemptOperation(geomCell, g -> g.intersection(mask));
+				// Fix nucleus overlaps (added v0.4.0)
+				var geomCell2 = geomCell;
+				geomNucleus = GeometryTools.attemptOperation(geomNucleus, g -> g.intersection(geomCell2));
+				geomNucleus = GeometryTools.ensurePolygonal(geomNucleus);
 			}
 			geomCell = simplify(geomCell);
 			
@@ -947,6 +1068,10 @@ public class StarDist2D implements AutoCloseable {
 				logger.warn("Empty cell boundary at {} will be skipped", nucleus.geometry.getCentroid());
 				return null;
 			}
+			if (geomNucleus.isEmpty()) {
+				logger.warn("Empty nucleus at {} will be skipped", nucleus.geometry.getCentroid());
+				return null;
+			}
 			var roiCell = GeometryTools.geometryToROI(geomCell, plane);
 			var roiNucleus = GeometryTools.geometryToROI(geomNucleus, plane);
 			if (creatorFun == null)
@@ -954,12 +1079,16 @@ public class StarDist2D implements AutoCloseable {
 			else {
 				pathObject = creatorFun.apply(roiCell);
 				if (roiNucleus != null) {
-					pathObject.addPathObject(creatorFun.apply(roiNucleus));
+					pathObject.addChildObject(creatorFun.apply(roiNucleus));
 				}
 			}
 		} else {
 			if (mask != null) {
 				geomNucleus = GeometryTools.attemptOperation(geomNucleus, g -> g.intersection(mask));
+				geomNucleus = GeometryTools.ensurePolygonal(geomNucleus);
+				if (geomNucleus.isEmpty()) {
+					return null;
+				}
 			}
 			var roiNucleus = GeometryTools.geometryToROI(geomNucleus, plane);
 			if (creatorFun == null)
@@ -969,7 +1098,7 @@ public class StarDist2D implements AutoCloseable {
 		}
 		if (includeProbability) {
         	try (var ml = pathObject.getMeasurementList()) {
-        		ml.putMeasurement("Detection probability", nucleus.getProbability());
+        		ml.put("Detection probability", nucleus.getProbability());
         	}
         }
 		
@@ -1093,8 +1222,7 @@ public class StarDist2D implements AutoCloseable {
 //						PathClassFactory.getPathClass("Temporary")
 //						));
 		
-		try (@SuppressWarnings("unchecked")
-		var scope = new PointerScope()) {
+		try (var scope = new PointerScope()) {
 			Mat mat;
 			try {
 				mat = op.apply(imageData, requestPadded);
@@ -1167,6 +1295,8 @@ public class StarDist2D implements AutoCloseable {
 			// Depending upon model export, we might have a half resolution prediction that needs to be rescaled
 			long inputWidth = mat.cols();
 			long inputHeight = mat.rows();
+			if (inputWidth <= 0 || inputHeight <= 0)
+				throw new RuntimeException("Mat dimensions are unknown!");
 			double scaleX = Math.round((double)inputWidth / matProb.cols());
 			double scaleY = Math.round((double)inputHeight / matProb.rows());
 			if (scaleX != 1.0 || scaleY != 1.0) {
@@ -1227,8 +1357,44 @@ public class StarDist2D implements AutoCloseable {
 	 * @return
 	 */
 	public static Builder builder(String modelPath) {
-		return new Builder(modelPath);
+		var builder = maybeCreateBioimageIoBuilder(modelPath);
+		if (builder == null)
+			return new Builder(modelPath);
+		else {
+			return builder;
+		}
 	}
+	
+	
+	/**
+	 * Maybe initialize the builder from a BioimageIO model spec... if we can
+	 * @param path
+	 * @return
+	 */
+	private static Builder maybeCreateBioimageIoBuilder(String path) {
+		var p = Paths.get(path);
+		if (!Files.exists(p))
+			return null;
+		try {
+			if (isYamlFile(p) || (Files.isDirectory(p) && Files.list(p).anyMatch(StarDist2D::isYamlFile))) {
+				return StarDistBioimageIo.builder(p);
+			}
+		} catch (IOException e) {
+			logger.debug("Exception attempting to parse BioimageIOSpec: " + e.getLocalizedMessage(), e);
+		} catch (UnsatisfiedLinkError e) {
+			logger.debug("Unable to parse BioimageIOSpec: " + e.getLocalizedMessage(), e);				
+		}
+		return null;
+	}
+	
+	private static boolean isYamlFile(Path path) {
+		if (Files.isRegularFile(path)) {
+			var name = path.getFileName().toString().toLowerCase();
+			return name.endsWith(".yml") || name.endsWith(".yaml");
+		}
+		return false;
+	}
+	
 	
 	
 	/**
@@ -1240,6 +1406,33 @@ public class StarDist2D implements AutoCloseable {
 	 */
 	public static Builder builder(DnnModel<?> dnn) {
 		return new Builder(dnn);		
+	}
+	
+	
+	/**
+	 * Build a normalization op that can be based upon the entire (2D) image, rather than only local tiles.
+	 * <p>
+	 * Example:
+	 * <pre>
+	 * <code>
+	 *   var builder = StarDist2D.builder()
+	 *   	.preprocess(
+	 *   		StarDist2D.imageNormalizationBuilder()
+	 *   			.percentiles(0, 99.8)
+	 *   			.perChannel(false)
+	 *   			.downsample(10)
+	 *   			.build()
+	 *   	).pixelSize(0.5) // Any other options to customize StarDist2D
+	 *   	.build()
+	 * </code>
+	 * </pre>
+	 * <p>
+	 * Note that currently this requires downsampling the image to a manageable size.
+	 * 
+	 * @return
+	 */
+	public static ImageNormalizationBuilder imageNormalizationBuilder() {
+		return new ImageNormalizationBuilder();
 	}
 	
 	
@@ -1334,7 +1527,7 @@ public class StarDist2D implements AutoCloseable {
 	}
 
 
-	private List<PotentialNucleus> filterNuclei(List<PotentialNucleus> potentialNuclei) {
+	private static List<PotentialNucleus> filterNuclei(List<PotentialNucleus> potentialNuclei) {
 		
 		// Sort in descending order of probability
 		Collections.sort(potentialNuclei, Comparator.comparingDouble((PotentialNucleus n) -> n.getProbability()).reversed());
@@ -1346,32 +1539,57 @@ public class StarDist2D implements AutoCloseable {
 	    
 	    // Create a spatial cache to find overlaps more quickly
 	    // (Because of later tests, we don't need to update envelopes even though geometries may be modified)
-	    Map<PotentialNucleus, Envelope> envelopes = new HashMap<>();
+	    Map<Geometry, Envelope> envelopes = new HashMap<>();
 	    var tree = new STRtree();
 	    for (var nuc : potentialNuclei) {
 	    	var env = nuc.geometry.getEnvelopeInternal();
-	    	envelopes.put(nuc, env);
+	    	envelopes.put(nuc.geometry, env);
 	    	tree.insert(env, nuc);
 	    }
+	    
+	    var preparingFactory = new PreparedGeometryFactory();
 	    
 	    for (var nucleus : potentialNuclei) {
 	        if (skippedNucleus.contains(nucleus))
 	            continue;
 	        
 	        nuclei.add(nucleus);
-        	var envelope = envelopes.get(nucleus);
+        	var envelope = envelopes.computeIfAbsent(nucleus.geometry, g -> g.getEnvelopeInternal());
         	
         	@SuppressWarnings("unchecked")
 			var overlaps = (List<PotentialNucleus>)tree.query(envelope);
-        	for (var nucleus2 : overlaps) {
+        	
+        	// Remove the overlaps that we can be sure don't apply using quick tests, to avoid expensive ones
+        	var iter = overlaps.iterator();
+        	while (iter.hasNext()) {
+        		var nucleus2 = iter.next();
         		if (nucleus2 == nucleus || skippedNucleus.contains(nucleus2) || nuclei.contains(nucleus2))
-        			continue;
-        		
-            	// If we have an overlap, retain the higher-probability nucleus only (i.e. the one we met first)
+        			iter.remove();
+        		else {
+        			// Envelope text needed because nuclei can have been modified
+	        		var env = envelopes.computeIfAbsent(nucleus2.geometry, g -> g.getEnvelopeInternal());
+	            	if (!envelope.intersects(env))
+	            		iter.remove();
+        		}
+        	}
+        	
+        	// If we need to compare a lot of intersections, preparing the geometry can speed things up
+        	PreparedGeometry prepared = null;
+        	if (overlaps.size() > 5) {
+        		prepared = preparingFactory.create(nucleus.geometry);
+        	}
+        	for (var nucleus2 : overlaps) {
+        		// If we have an overlap, retain the higher-probability nucleus only (i.e. the one we met first)
         		// Try to refine other nuclei
 	            try {
-	            	var env = envelopes.get(nucleus2);
-	                if (envelope.intersects(env) && nucleus.geometry.intersects(nucleus2.geometry)) {
+	            	boolean checkDifference = true;
+	            	if (prepared == null) {
+	            		// We could check for intersection, but it seems faster to just compute difference
+	            		// (this would warrant some more systematic checking though)
+	            		checkDifference = true;//nucleus.geometry.intersects(nucleus2.geometry);
+	            	} else
+	            		checkDifference = prepared.intersects(nucleus2.geometry);
+	                if (checkDifference) {
 	                	// Retain the nucleus only if it is not fragmented, or less than half its original area
 	                    var difference = nucleus2.geometry.difference(nucleus.geometry);
 	                    
@@ -1394,8 +1612,9 @@ public class StarDist2D implements AutoCloseable {
 	    }
 	    if (skipErrorCount > 0) {
 	    	int skipCount = skippedNucleus.size();
-	    	logger.warn("Skipped {} nucleus detection(s) due to error in resolving overlaps ({}% of all skipped)", 
-	    			skipErrorCount, GeneralTools.formatNumber(skipErrorCount*100.0/skipCount, 1));
+	    	String s = skipErrorCount == 1 ? "1 nucleus" : skipErrorCount + " nuclei";
+	    	logger.warn("Skipped {} due to error in resolving overlaps ({}% of all skipped)", 
+	    			s, GeneralTools.formatNumber(skipErrorCount*100.0/skipCount, 1));
 	    }
 	    return new ArrayList<>(nuclei);
 	}
@@ -1451,5 +1670,6 @@ public class StarDist2D implements AutoCloseable {
 		} else if (dnn instanceof AutoCloseable)
 			((AutoCloseable) dnn).close();
 	}
+	
 	
 }
