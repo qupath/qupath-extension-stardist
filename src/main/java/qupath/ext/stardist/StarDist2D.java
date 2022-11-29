@@ -142,6 +142,9 @@ public class StarDist2D implements AutoCloseable {
 		private int tileWidth = -1;
 		private int tileHeight = -1;
 		
+		// Optional layout string, following the bioimage.io spec
+		private String layout;
+		
 		private Function<ROI, PathObject> creatorFun;
 		
 		private PathClass globalPathClass;
@@ -216,6 +219,26 @@ public class StarDist2D implements AutoCloseable {
 		 */
 		public Builder doLog() {
 			this.doLog = true;
+			return this;
+		}
+		
+		
+		/**
+		 * Optional layout string giving the axes of the input required 
+		 * by the model, following the Bioimage Model Zoo spec for axes.
+		 * <p>
+		 * Generally it should be possible to leave this unspecified, 
+		 * but the option exists for cases where the model format might be 
+		 * different from what is expected.
+		 * <p>
+		 * An example string would be {@code "yxc"} indicating channels-last,
+		 * or {@code "byxc"} indicating that a batch index is required.
+		 * 
+		 * @param layout
+		 * @return
+		 */
+		public Builder layout(String layout) {
+			this.layout = layout;
 			return this;
 		}
 		
@@ -637,6 +660,7 @@ public class StarDist2D implements AutoCloseable {
 				try {
 					var params = DnnModelParams.builder()
 							.files(file)
+							.layout(layout)
 							.build();
 					dnn = DnnModels.buildModel(params);
 					if (dnn != null)
@@ -1271,6 +1295,8 @@ public class StarDist2D implements AutoCloseable {
 			// Depending upon model export, we might have a half resolution prediction that needs to be rescaled
 			long inputWidth = mat.cols();
 			long inputHeight = mat.rows();
+			if (inputWidth <= 0 || inputHeight <= 0)
+				throw new RuntimeException("Mat dimensions are unknown!");
 			double scaleX = Math.round((double)inputWidth / matProb.cols());
 			double scaleY = Math.round((double)inputHeight / matProb.rows());
 			if (scaleX != 1.0 || scaleY != 1.0) {
@@ -1501,7 +1527,7 @@ public class StarDist2D implements AutoCloseable {
 	}
 
 
-	private List<PotentialNucleus> filterNuclei(List<PotentialNucleus> potentialNuclei) {
+	private static List<PotentialNucleus> filterNuclei(List<PotentialNucleus> potentialNuclei) {
 		
 		// Sort in descending order of probability
 		Collections.sort(potentialNuclei, Comparator.comparingDouble((PotentialNucleus n) -> n.getProbability()).reversed());
@@ -1586,8 +1612,9 @@ public class StarDist2D implements AutoCloseable {
 	    }
 	    if (skipErrorCount > 0) {
 	    	int skipCount = skippedNucleus.size();
-	    	logger.warn("Skipped {} nucleus detection(s) due to error in resolving overlaps ({}% of all skipped)", 
-	    			skipErrorCount, GeneralTools.formatNumber(skipErrorCount*100.0/skipCount, 1));
+	    	String s = skipErrorCount == 1 ? "1 nucleus" : skipErrorCount + " nuclei";
+	    	logger.warn("Skipped {} due to error in resolving overlaps ({}% of all skipped)", 
+	    			s, GeneralTools.formatNumber(skipErrorCount*100.0/skipCount, 1));
 	    }
 	    return new ArrayList<>(nuclei);
 	}

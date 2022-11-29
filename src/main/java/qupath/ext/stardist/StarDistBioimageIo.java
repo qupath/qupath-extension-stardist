@@ -159,11 +159,13 @@ class StarDistBioimageIo {
 		if (modelPath != null) {
 			String absolutePath = modelPath.toAbsolutePath().toString();
 			if (absolutePath.toLowerCase().endsWith(".zip")) {
-				var pathUnzipped = Paths.get(absolutePath.substring(absolutePath.length()-4));
+				var pathUnzipped = Paths.get(absolutePath.substring(0, absolutePath.length()-4));
 				if (Files.isDirectory(pathUnzipped)) {
 					logger.info("Replacing {} with unzipped version {}", modelPath.getFileName(), pathUnzipped.getFileName());
 					modelPath = pathUnzipped;
-				}
+				} else
+					logger.warn("Zipped model directories not supported!");
+					logger.warn("Please unzip {} and try again", modelPath);
 			}
 		}
 		var builder = StarDist2D.builder(modelPath.toString());
@@ -206,6 +208,8 @@ class StarDistBioimageIo {
 		if (tileWidth > 0 && tileHeight > 0)
 			builder.tileSize(tileWidth, tileHeight);
 
+		if (axes != null)
+			builder.layout(axes);
 		
 		return builder;
 	}
