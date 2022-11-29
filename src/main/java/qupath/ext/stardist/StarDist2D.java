@@ -1377,7 +1377,7 @@ public class StarDist2D implements AutoCloseable {
 			return null;
 		try {
 			if (isYamlFile(p) || (Files.isDirectory(p) && Files.list(p).anyMatch(StarDist2D::isYamlFile))) {
-				return StarDistBioimageIo.parseModel(p);
+				return StarDistBioimageIo.builder(p);
 			}
 		} catch (IOException e) {
 			logger.debug("Exception attempting to parse BioimageIOSpec: " + e.getLocalizedMessage(), e);

@@ -23,33 +23,26 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
-import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import qupath.bioimageio.spec.BioimageIoSpec;
 import qupath.bioimageio.spec.BioimageIoSpec.BioimageIoModel;
-import qupath.bioimageio.spec.BioimageIoSpec.Processing;
-import qupath.bioimageio.spec.BioimageIoSpec.Processing.Binarize;
-import qupath.bioimageio.spec.BioimageIoSpec.Processing.Clip;
 import qupath.bioimageio.spec.BioimageIoSpec.Processing.ScaleLinear;
-import qupath.bioimageio.spec.BioimageIoSpec.Processing.ScaleMeanVariance;
 import qupath.bioimageio.spec.BioimageIoSpec.Processing.ScaleRange;
-import qupath.bioimageio.spec.BioimageIoSpec.Processing.Sigmoid;
 import qupath.bioimageio.spec.BioimageIoSpec.Processing.ZeroMeanUnitVariance;
 import qupath.bioimageio.spec.BioimageIoSpec.WeightsEntry;
 import qupath.ext.stardist.OpCreators.TileOpCreator;
 import qupath.lib.common.GeneralTools;
 import qupath.lib.io.GsonTools;
+import qupath.opencv.ml.BioimageIoTools;
 import qupath.opencv.ops.ImageOp;
-import qupath.opencv.ops.ImageOps;
 
 /**
- * Helper class to create a StarDist2D builder, initializing it froma  BioimageIO Model Zoo file.
+ * Helper class to create a StarDist2D builder, initializing it from a BioimageIO Model Zoo file.
  * 
  * @author Pete Bankhead
  * @since v0.4.0
@@ -58,13 +51,96 @@ class StarDistBioimageIo {
 	
 	private static final Logger logger = LoggerFactory.getLogger(StarDistBioimageIo.class);
 	
+	private static int DEFAULT_MAX_DIM = 4096;
+	private static double DEFAULT_DOWNSAMPLE = Double.NaN;
 	
-	static StarDist2D.Builder parseModel(Path path) throws IOException {
-		return parseModel(BioimageIoSpec.parseModel(path));
+	/**
+	 * Create a builder by parsing the model spec given by the file path.
+	 * The syntax is intended to be 'Groovy-friendly', using the map as first argument to request optional named parameters.
+	 * @param params optional named parameters for global normalization; supports "maxDim" and "downsample"
+	 * @param path
+	 * @return
+	 * @throws IOException
+	 */
+	static StarDist2D.Builder builder(Map<String, ?> params, String path) throws IOException {
+		return builder(params, Paths.get(path));
 	}
 	
+	/**
+	 * Create a builder by parsing the model spec given by the file path.
+	 * @param path
+	 * @return
+	 * @throws IOException
+	 */
+	static StarDist2D.Builder builder(String path) throws IOException {
+		return builder(Collections.emptyMap(), Paths.get(path));
+	}
+
+	/**
+	 * Create a builder by parsing the model spec given by the file.
+	 * The syntax is intended to be 'Groovy-friendly', using the map as first argument to request optional named parameters.
+	 * @param params optional named parameters for global normalization; supports "maxDim" and "downsample"
+	 * @param file
+	 * @return
+	 * @throws IOException
+	 */
+	static StarDist2D.Builder builder(Map<String, ?> params, File file) throws IOException {
+		return builder(params, file.toPath());
+	}
 	
-	static StarDist2D.Builder parseModel(BioimageIoModel model) {
+	/**
+	 * Create a builder by parsing the model spec given by the file.
+	 * @param file
+	 * @return
+	 * @throws IOException
+	 */
+	static StarDist2D.Builder builder(File file) throws IOException {
+		return builder(Collections.emptyMap(), file);
+	}
+	
+	/**
+	 * Create a builder by parsing the model spec given by the path.
+	 * @param path
+	 * @return
+	 * @throws IOException
+	 */
+	static StarDist2D.Builder builder(Path path) throws IOException {
+		return builder(Collections.emptyMap(), path);
+	}
+	
+	/**
+	 * Create a builder by parsing the model spec given by the path.
+	 * The syntax is intended to be 'Groovy-friendly', using the map as first argument to request optional named parameters.
+	 * @param params optional named parameters for global normalization; supports "maxDim" (int) and "downsample" (double).
+	 * @param path
+	 * @return
+	 * @throws IOException
+	 */
+	static StarDist2D.Builder builder(Map<String, ?> params, Path path) throws IOException {
+		
+		int maxDim = DEFAULT_MAX_DIM;
+		double downsample = DEFAULT_DOWNSAMPLE;
+		
+		if (params != null && !params.isEmpty()) {
+			Object val = params.getOrDefault("maxDim", null);
+			if (val instanceof Number)
+				maxDim = ((Number)val).intValue();
+			else if (val != null)
+				logger.warn("Unsupported value for maxDim {} (must be an integer)", val);
+	
+			val = params.getOrDefault("downsample", null);
+			if (val instanceof Number)
+				downsample = ((Number)val).doubleValue();
+			else if (val != null)
+				logger.warn("Unsupported value for downsample {} (must be an integer)", val);
+		}
+		
+		logger.debug("Creating builder from {} with maxDim={}, downsample={}", path.getFileName(), maxDim, downsample);
+		return builder(BioimageIoSpec.parseModel(path), maxDim, downsample);
+	}
+		
+	
+	static StarDist2D.Builder builder(BioimageIoModel model, int globalMaxDim, double globalDownsample) {
 				
 		logger.info("Initializing builder from BioImage Model Zoo spec");
 		
@@ -85,6 +161,7 @@ class StarDistBioimageIo {
 		tileHeight = inputShapeArray[inputAxes.indexOf('y')];
 		
 		// Handle preprocessing
+		// Here, we make it global if we can
 		TileOpCreator globalOpCreator = null;
 		List<ImageOp> preprocessing = new ArrayList<>();
 		boolean warnLogged = true;
@@ -94,25 +171,33 @@ class StarDistBioimageIo {
 					var zeroMean = (ZeroMeanUnitVariance)preprocess;
 					var axes = zeroMean.getAxes();
 					boolean perChannel = axes == null ? true : !axes.contains("c");
-					logger.info("Setting");
+					logger.info("Normalization by zero-mean-unit-variance (perChannel={}, maxDim={}, downsample={})", perChannel, globalMaxDim, globalDownsample);
 					globalOpCreator = OpCreators.imageNormalizationBuilder()
 							.zeroMeanUnitVariance(true)
 							.perChannel(perChannel)
+							.maxDimension(globalMaxDim)
+							.downsample(globalDownsample)
 							.build();
 					continue;
 				} else if (preprocess instanceof ScaleRange) {
 					var scaleRange = (ScaleRange)preprocess;
 					var axes = scaleRange.getAxes();
 					boolean perChannel = axes == null ? true : !axes.contains("c");
+					logger.info("Normalization by percentile (min={}, max={}, perChannel={}; maxDim={}, downsample={})",
+							scaleRange.getMinPercentile(), scaleRange.getMaxPercentile(),
+							perChannel,
+							globalMaxDim, globalDownsample);
 					globalOpCreator = OpCreators.imageNormalizationBuilder()
 							.percentiles(scaleRange.getMinPercentile(),
 									scaleRange.getMaxPercentile())
 							.eps(scaleRange.getEps())
+							.maxDimension(globalMaxDim)
+							.downsample(globalDownsample)
 							.perChannel(perChannel)
 							.build();
 					continue;					
 				} else {
-					var op = transformToOp(preprocess);
+					var op = BioimageIoTools.transformToOp(preprocess);
 					if (op != null) {
 						if (!warnLogged) {
 							logger.warn("Adding local preprocessing operation {}", preprocess);
@@ -215,108 +300,6 @@ class StarDistBioimageIo {
 	}
 	
 	
-	
-	private static ImageOp transformToOp(Processing transform) {
-		
-		if (transform instanceof Binarize) {
-			var binarize = (Binarize)transform;
-			return ImageOps.Threshold.threshold(binarize.getThreshold());
-		}
-		
-		if (transform instanceof Clip) {
-			var clip = (Clip)transform;
-			return ImageOps.Core.clip(clip.getMin(), clip.getMax());
-		}
-		
-		if (transform instanceof ScaleLinear) {
-			var scale = (ScaleLinear)transform;
-			// TODO: Consider axes
-			return ImageOps.Core.sequential(
-					ImageOps.Core.multiply(scale.getGain()),
-					ImageOps.Core.add(scale.getOffset())					
-					);
-		}
-
-		if (transform instanceof ScaleMeanVariance) {
-			// TODO: Figure out if possible to somehow support ScaleMeanVariance
-			var scale = (ScaleMeanVariance)transform;
-			logger.warn("Unsupported transform {} - cannot access reference tensor {}", transform, scale.getReferenceTensor());
-			return null;
-		}
-
-		if (transform instanceof ScaleRange) {
-			var scale = (ScaleRange)transform;
-			var mode = warnIfUnsupportedMode(transform.getName(), scale.getMode(), List.of(Processing.ProcessingMode.PER_SAMPLE));
-			assert mode == Processing.ProcessingMode.PER_SAMPLE; // TODO: Consider how to support per dataset
-			var axes = scale.getAxes();
-			boolean perChannel = false;
-			if (axes != null)
-				perChannel = !axes.contains("c");
-			else
-				logger.warn("Axes not specified for {} - channels will be normalized jointly", transform);
-			return ImageOps.Normalize.percentile(scale.getMinPercentile(), scale.getMaxPercentile(), perChannel, scale.getEps());
-		}
-
-		if (transform instanceof Sigmoid) {
-			return ImageOps.Normalize.sigmoid();
-		}
-		
-		if (transform instanceof ZeroMeanUnitVariance) {
-			var zeroMeanUnitVariance = (ZeroMeanUnitVariance)transform;
-			var mode = warnIfUnsupportedMode(transform.getName(), zeroMeanUnitVariance.getMode(), List.of(Processing.ProcessingMode.PER_SAMPLE, Processing.ProcessingMode.FIXED));
-			if (mode == Processing.ProcessingMode.PER_SAMPLE) {
-				var axes = zeroMeanUnitVariance.getAxes();
-				boolean perChannel = false;
-				if (axes != null) {
-					perChannel = !axes.contains("c");
-					// Try to check axes are as expected
-					if (!(sameAxes(axes, "xy") || sameAxes(axes, "xyc")))
-						logger.warn("Unsupported axes {} for {} - I will use {} instead", axes, transform.getName(), perChannel ? "xy" : "xyc");
-				} else
-					logger.warn("Axes not specified for {} - channels will be normalized jointly", transform);
-
-				return ImageOps.Normalize.zeroMeanUnitVariance(perChannel, zeroMeanUnitVariance.getEps());
-//				return ImageOps.Normalize.zeroMeanUnitVariance(perChannel, zeroMeanUnitVariance.getEps());
-			} else {
-				assert mode == Processing.ProcessingMode.FIXED;
-				double[] std = zeroMeanUnitVariance.getStd();
-				// In specification, eps is added
-				for (int i = 0; i < std.length; i++)
-					std[i] += zeroMeanUnitVariance.getEps();
-				return ImageOps.Core.sequential(
-						ImageOps.Core.subtract(zeroMeanUnitVariance.getMean()),
-						ImageOps.Core.divide(std)
-						);
-			}
-		}
-
-		logger.warn("Unknown transform {} - cannot convert to ImageOp", transform);
-		return null;
-	}
-	
-	
-	private static boolean sameAxes(String input, String target) {
-		if (Objects.equals(input, target))
-			return true;
-		if (input == null || target == null || input.length() != target.length())
-			return false;
-		var inputArray = input.toLowerCase().toCharArray();
-		var targetArray = target.toLowerCase().toCharArray();
-		Arrays.sort(inputArray);
-		Arrays.sort(targetArray);
-		return Arrays.equals(inputArray, targetArray);
-	}
-	
-	
-	private static Processing.ProcessingMode warnIfUnsupportedMode(String transformName, Processing.ProcessingMode mode, List<Processing.ProcessingMode> allowed) {
-		if (mode == null || mode == Processing.ProcessingMode.PER_DATASET) {
-			logger.warn("Unsupported mode {} for {}, will be switched to {}", mode, transformName, allowed.get(0));
-			return allowed.get(0);
-		}
-		return mode;
-	}
-	
-	
 	/**
 	 * Main method to test models can be parsed.
 	 * @param args
@@ -330,9 +313,7 @@ class StarDistBioimageIo {
 			
 		for (var arg : args) {
 			try {
-				var model = BioimageIoSpec.parseModel(new File(arg));
-				
-				var builder = parseModel(model);
+				var builder = builder(null, arg);
 				
 				System.out.println(
 						GsonTools.getInstance(true).toJson(builder)
