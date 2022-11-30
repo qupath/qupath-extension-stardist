@@ -37,6 +37,6 @@ jobs:
         arguments: build
     - uses: actions/upload-artifact@v3
       with:
-        name: jar
+        name: qupath-stardist-extension-jar
         path: build/libs
-        retention-days: 1
+        retention-days: 7
