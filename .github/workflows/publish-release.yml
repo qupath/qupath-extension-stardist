@@ -25,3 +25,8 @@ jobs:
       env:
         MAVEN_USER: ${{ secrets.MAVEN_USER }}
         MAVEN_PASS: ${{ secrets.MAVEN_PASS }}
+    - uses: actions/upload-artifact@v3
+      with:
+        name: qupath-stardist-extension-release-jar
+        path: build/libs
+        retention-days: 7

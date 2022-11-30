@@ -17,10 +17,7 @@
 package qupath.ext.stardist;
 
 import java.io.IOException;
-import java.net.URI;
-import java.net.URISyntaxException;
-import java.nio.file.Files;
-import java.nio.file.Paths;
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
 import org.controlsfx.control.action.Action;
@@ -61,23 +58,17 @@ public class StarDistExtension implements QuPathExtension, GitHubProject {
 		if (isInstalled)
 			return;
 		
-		// Does nothing
 		for (var entry : SCRIPTS.entrySet()) {
-			try {
-				var script = entry.getValue();
-				var command = entry.getKey();
-				var url = StarDist2D.class.getClassLoader().getResource(script);
-				if (url == null) {
-					logger.warn("Unable to find script URL for {}", script);
-					continue;
-				}
-				var uri = url.toURI();
-				if (uri != null) {
+			var name = entry.getValue();
+			var command = entry.getKey();
+			try (var stream = StarDist2D.class.getClassLoader().getResourceAsStream(name)) {
+				var script = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
+				if (script != null) {
 					MenuTools.addMenuItems(
 			                qupath.getMenu("Extensions>StarDist", true),
-			                new Action(command, e -> openScript(qupath, uri)));
+			                new Action(command, e -> openScript(qupath, script)));
 				}
-			} catch (URISyntaxException e) {
+			} catch (IOException e) {
 				logger.error(e.getLocalizedMessage(), e);
 			}
 		}
@@ -105,18 +96,13 @@ public class StarDistExtension implements QuPathExtension, GitHubProject {
 	}
 	
 	
-	private static void openScript(QuPathGUI qupath, URI uri) {
+	private static void openScript(QuPathGUI qupath, String script) {
 		var editor = qupath.getScriptEditor();
 		if (editor == null) {
 			logger.error("No script editor is available!");
 			return;
 		}
-		try {
-			var script = Files.readString(Paths.get(uri));
-			qupath.getScriptEditor().showScript("StarDist detection", script);
-		} catch (IOException e) {
-			logger.error("Unable to open script: " + e.getLocalizedMessage(), e);
-		}
+		qupath.getScriptEditor().showScript("StarDist detection", script);
 	}
 	
 
