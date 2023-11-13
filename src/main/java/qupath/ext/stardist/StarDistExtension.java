@@ -62,11 +62,13 @@ public class StarDistExtension implements QuPathExtension, GitHubProject {
 			var name = entry.getValue();
 			var command = entry.getKey();
 			try (var stream = StarDist2D.class.getClassLoader().getResourceAsStream(name)) {
-				var script = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
-				if (script != null) {
+				if (stream != null) {
+					var script = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
 					MenuTools.addMenuItems(
-			                qupath.getMenu("Extensions>StarDist", true),
-			                new Action(command, e -> openScript(qupath, script)));
+							qupath.getMenu("Extensions>StarDist", true),
+							new Action(command, e -> openScript(qupath, script)));
+				} else {
+					logger.warn("Resource not found: {}", name);
 				}
 			} catch (IOException e) {
 				logger.error(e.getLocalizedMessage(), e);
@@ -87,7 +89,7 @@ public class StarDistExtension implements QuPathExtension, GitHubProject {
 	
 	@Override
 	public Version getQuPathVersion() {
-		return Version.parse("0.4.0-SNAPSHOT");
+		return Version.parse("0.5.0-SNAPSHOT");
 	}
 
 	@Override
