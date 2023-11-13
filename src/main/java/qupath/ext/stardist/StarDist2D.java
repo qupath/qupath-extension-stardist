@@ -125,7 +125,7 @@ public class StarDist2D implements AutoCloseable {
 		private int nThreads = -1;
 		
 		private String modelPath = null;
-		private DnnModel<?> dnn = null;
+		private DnnModel dnn = null;
 		private ColorTransform[] channels = new ColorTransform[0];
 		
 		private double threshold = 0.5;
@@ -167,7 +167,7 @@ public class StarDist2D implements AutoCloseable {
 			this.modelPath = modelPath;
 		}
 		
-		private Builder(DnnModel<?> dnn) {
+		private Builder(DnnModel dnn) {
 			this.dnn = dnn;
 		}
 		
@@ -721,7 +721,7 @@ public class StarDist2D implements AutoCloseable {
 	private ImageDataOp op;
 	private TileOpCreator globalPreprocess;
 	private List<ImageOp> preprocess;
-	private DnnModel<?> dnn;
+	private DnnModel dnn;
 	
 	private double pixelSize;
 	private double cellExpansion;
@@ -1180,7 +1180,7 @@ public class StarDist2D implements AutoCloseable {
 	}
 	
 	
-	private List<PotentialNucleus> detectObjectsForTile(ImageDataOp op, DnnModel<?> dnn, ImageData<BufferedImage> imageData, RegionRequest request, boolean excludeOnBounds, Geometry mask) {
+	private List<PotentialNucleus> detectObjectsForTile(ImageDataOp op, DnnModel dnn, ImageData<BufferedImage> imageData, RegionRequest request, boolean excludeOnBounds, Geometry mask) {
 
 		List<PotentialNucleus> nuclei;
 		
@@ -1398,7 +1398,7 @@ public class StarDist2D implements AutoCloseable {
 	 * @param dnn the model to use for prediction
 	 * @return
 	 */
-	public static Builder builder(DnnModel<?> dnn) {
+	public static Builder builder(DnnModel dnn) {
 		return new Builder(dnn);		
 	}
 	
