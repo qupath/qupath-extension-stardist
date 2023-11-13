@@ -669,19 +669,9 @@ public class StarDist2D implements AutoCloseable {
 					logger.error("Unable to load model file: " + e.getLocalizedMessage(), e);
 					throw new RuntimeException("Unable to load StarDist model from " + modelPath, e);
 				}
-				// Try using legacy TensorFlow approach
+				// Report if we have no model
 				if (dnn == null) {
-					try {
-						// For backwards compatibility, we try to support TensorFlow if the extension is installed
-						var clsTF = Class.forName("qupath.ext.tensorflow.TensorFlowTools");
-						var method = clsTF.getMethod("createDnnModel", String.class);
-						dnn = (DnnModel<?>)method.invoke(null, modelPath);
-						logger.debug("Loaded model {} with TensorFlow", modelPath);
-					} catch (Exception e) {
-						logger.error("Unable to load TensorFlow with reflection - are you sure it is available and on the classpath?");
-						logger.error(e.getLocalizedMessage(), e);
-						throw new RuntimeException("Unable to load StarDist model from " + modelPath, e);
-					}
+					throw new IllegalArgumentException("No StarDist model found for path " + modelPath);
 				}
 			}
 			
