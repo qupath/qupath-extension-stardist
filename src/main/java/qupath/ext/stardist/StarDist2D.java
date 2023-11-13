@@ -658,10 +658,10 @@ public class StarDist2D implements AutoCloseable {
 					throw new IllegalArgumentException("I couldn't find the model file " + file.getAbsolutePath());
 				}
 				try {
-					var params = DnnModelParams.builder()
+					var builder = DnnModelParams.builder()
 							.files(file)
-							.layout(layout)
-							.build();
+							.layout(layout);
+					var params = builder.build();
 					dnn = DnnModels.buildModel(params);
 					if (dnn != null)
 						logger.debug("Loaded model {} as {}", modelPath, dnn);
@@ -875,7 +875,11 @@ public class StarDist2D implements AutoCloseable {
 			resolution = resolution.createScaledInstance(downsample, downsample);
 		}
 		int tw = tileWidth <= 0 ? defaultTileSize : tileWidth;
-		int th = tileHeight <= 0 ? defaultTileSize : tileWidth;
+		int th = tileHeight <= 0 ? tw : tileHeight;
+
+		if (tw <= pad*2 || th <= pad*2) {
+			throw new IllegalArgumentException("Tile width & height must be > padding * 2");
+		}
 		
 		// The opServer is needed only to get tile requests, or calculate global normalization percentiles
 		var opServer = ImageOps.buildServer(imageData, op, resolution, tw - pad*2, th - pad*2);

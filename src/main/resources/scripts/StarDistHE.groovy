@@ -11,7 +11,6 @@
  */
 
 import qupath.ext.stardist.StarDist2D
-import qupath.fx.dialogs.Dialogs
 import qupath.lib.scripting.QP
  
 // IMPORTANT! Replace this with the path to your StarDist model

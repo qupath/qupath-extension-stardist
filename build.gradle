@@ -1,9 +1,9 @@
 plugins {
   id 'java-library'
   id 'maven-publish'
-  // To manage included native libraries
-   alias(libs.plugins.javacpp)
-//  id 'org.bytedeco.gradle-javacpp-platform' // Needed for includeFlat?
+  id 'org.openjfx.javafxplugin' version '0.1.0'
+  // Version in settings.gradle
+  id 'org.bytedeco.gradle-javacpp-platform'
 }
 
 ext.moduleName = 'qupath.extension.stardist'
