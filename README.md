@@ -1,3 +1,8 @@
+[![Extension docs](https://img.shields.io/badge/docs-qupath_stardist-red)](https://qupath.readthedocs.io/en/stable/docs/deep/stardist.html)
+[![Forum](https://img.shields.io/badge/forum-image.sc-green)](https://forum.image.sc/tag/qupath)
+[![Downloads (latest release)](https://img.shields.io/github/downloads-pre/qupath/qupath-extension-stardist/latest/total)](https://github.com/qupath/qupath-extension-stardist/releases/latest)
+[![Downloads (all releases)](https://img.shields.io/github/downloads/qupath/qupath-extension-stardist/total)](https://github.com/qupath/qupath-extension-stardist/releases)
+
 # QuPath StarDist extension
 
 Welcome to the StarDist extension for [QuPath](http://qupath.github.io)!
