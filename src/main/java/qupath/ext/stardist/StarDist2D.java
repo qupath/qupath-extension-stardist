@@ -67,6 +67,7 @@ import qupath.lib.analysis.features.ObjectMeasurements;
 import qupath.lib.analysis.features.ObjectMeasurements.Compartments;
 import qupath.lib.analysis.features.ObjectMeasurements.Measurements;
 import qupath.lib.common.GeneralTools;
+import qupath.lib.gui.UserDirectoryManager;
 import qupath.lib.images.ImageData;
 import qupath.lib.images.servers.ColorTransforms;
 import qupath.lib.images.servers.ColorTransforms.ColorTransform;
@@ -653,9 +654,10 @@ public class StarDist2D implements AutoCloseable {
 //			var padding = pad > 0 ? Padding.symmetric(pad) : Padding.empty();
 			var dnn = this.dnn;
 			if (dnn == null) {
-				var file = new File(modelPath);
-				if (!file.exists()) {
-					throw new IllegalArgumentException("I couldn't find the model file " + file.getAbsolutePath());
+				// Search for the model file - permitting a search in the user directory
+				var file = findModelFile(modelPath);
+				if (file == null || !file.exists()) {
+					throw new IllegalArgumentException("I couldn't find the model file " + modelPath);
 				}
 				try {
 					var builder = DnnModelParams.builder()
@@ -710,6 +712,53 @@ public class StarDist2D implements AutoCloseable {
 			return stardist;
 		}
 		
+	}
+
+	/**
+	 * Try to get a model file. First assume we have an absolute path, then check the user directory.
+	 * @param path
+	 * @return
+	 */
+	private static File findModelFile(String path) {
+		if (path == null || path.isEmpty())
+			return null;
+		var file = new File(path);
+		if (file.exists())
+			return file;
+		var userPath = UserDirectoryManager.getInstance().getUserPath();
+		if (userPath != null && Files.isDirectory(userPath)) {
+			try {
+				var potentialFiles = Files.walk(userPath)
+						.filter(p -> p.getFileName().toString().equals(path))
+						.sorted(Comparator.comparingInt((Path p) -> "stardist".equalsIgnoreCase(parentDirName(p)) ? -1 : 0)
+								.thenComparing((Path p) -> "models".equalsIgnoreCase(parentDirName(p)) ? -1 : 1)
+								.thenComparing(p -> p.toString()))
+						.map(p -> p.toFile())
+						.toList();
+				if (potentialFiles.isEmpty())
+					return null;
+				else if (potentialFiles.size() == 1) {
+					logger.debug("Found model file {}", file.getAbsolutePath());
+					return potentialFiles.get(0);
+				} else {
+					file = potentialFiles.get(0);
+					logger.warn("Found {} potential models for {}, will use {}",
+							potentialFiles.size(),
+							path,
+							file.getAbsolutePath());
+					return file;
+				}
+			} catch (IOException e) {
+				logger.error("Exception searching for model file: " + e.getMessage(), e);
+			}
+		}
+		return null;
+	}
+
+	private static String parentDirName(Path path) {
+		if (path == null || path.getParent() == null)
+			return null;
+		return path.getParent().getFileName().toString();
 	}
 	
 	private boolean doLog = false;
@@ -1240,7 +1289,7 @@ public class StarDist2D implements AutoCloseable {
 			
 			Map<String, Mat> output;
 //			synchronized(dnn) {
-				output = dnn.convertAndPredict(Map.of(DnnModel.DEFAULT_INPUT_NAME, mat));
+				output = dnn.predict(Map.of(DnnModel.DEFAULT_INPUT_NAME, mat));
 //			}
 			Mat matProb = null;
 			Mat matRays = null;
