@@ -1598,6 +1598,8 @@ public class StarDist2D implements AutoCloseable {
 	                    }
 	                }
 	            } catch (Exception e) {
+					logger.debug("Exception resolving nuclei: " + e.getMessage());
+					logger.trace(e.getMessage(), e);
                 	skippedNucleus.add(nucleus2);
 	            	skipErrorCount++;
 	            }
@@ -1605,9 +1607,11 @@ public class StarDist2D implements AutoCloseable {
         	}
 	    }
 	    if (skipErrorCount > 0) {
+			// Reduce warning to debug - this happens often for 1 or 2 nuclei but isn't necessarily
+			// a serious problem that the user should be aware of
 	    	int skipCount = skippedNucleus.size();
 	    	String s = skipErrorCount == 1 ? "1 nucleus" : skipErrorCount + " nuclei";
-	    	logger.warn("Skipped {} due to error in resolving overlaps ({}% of all skipped)", 
+	    	logger.debug("Skipped {} due to error in resolving overlaps ({}% of all skipped)",
 	    			s, GeneralTools.formatNumber(skipErrorCount*100.0/skipCount, 1));
 	    }
 	    return new ArrayList<>(nuclei);

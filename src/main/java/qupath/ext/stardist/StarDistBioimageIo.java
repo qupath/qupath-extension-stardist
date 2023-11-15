@@ -246,11 +246,11 @@ class StarDistBioimageIo {
 			if (absolutePath.toLowerCase().endsWith(".zip")) {
 				var pathUnzipped = Paths.get(absolutePath.substring(0, absolutePath.length()-4));
 				if (Files.isDirectory(pathUnzipped)) {
-					logger.info("Replacing {} with unzipped version {}", modelPath.getFileName(), pathUnzipped.getFileName());
+					logger.debug("Replacing {} with unzipped version {}", modelPath.getFileName(), pathUnzipped.getFileName());
 					modelPath = pathUnzipped;
-				} else
-					logger.warn("Zipped model directories not supported!");
-					logger.warn("Please unzip {} and try again", modelPath);
+				} else {
+					logger.warn("Zipped model directories not supported! Please unzip {} and try again", modelPath);
+				}
 			}
 		}
 		var builder = StarDist2D.builder(modelPath.toString());
