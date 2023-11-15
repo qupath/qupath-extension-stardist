@@ -67,6 +67,7 @@ import qupath.lib.analysis.features.ObjectMeasurements;
 import qupath.lib.analysis.features.ObjectMeasurements.Compartments;
 import qupath.lib.analysis.features.ObjectMeasurements.Measurements;
 import qupath.lib.common.GeneralTools;
+import qupath.lib.gui.UserDirectoryManager;
 import qupath.lib.images.ImageData;
 import qupath.lib.images.servers.ColorTransforms;
 import qupath.lib.images.servers.ColorTransforms.ColorTransform;
@@ -125,7 +126,7 @@ public class StarDist2D implements AutoCloseable {
 		private int nThreads = -1;
 		
 		private String modelPath = null;
-		private DnnModel<?> dnn = null;
+		private DnnModel dnn = null;
 		private ColorTransform[] channels = new ColorTransform[0];
 		
 		private double threshold = 0.5;
@@ -167,7 +168,7 @@ public class StarDist2D implements AutoCloseable {
 			this.modelPath = modelPath;
 		}
 		
-		private Builder(DnnModel<?> dnn) {
+		private Builder(DnnModel dnn) {
 			this.dnn = dnn;
 		}
 		
@@ -653,9 +654,10 @@ public class StarDist2D implements AutoCloseable {
 //			var padding = pad > 0 ? Padding.symmetric(pad) : Padding.empty();
 			var dnn = this.dnn;
 			if (dnn == null) {
-				var file = new File(modelPath);
-				if (!file.exists()) {
-					throw new IllegalArgumentException("I couldn't find the model file " + file.getAbsolutePath());
+				// Search for the model file - permitting a search in the user directory
+				var file = findModelFile(modelPath);
+				if (file == null || !file.exists()) {
+					throw new IllegalArgumentException("I couldn't find the model file " + modelPath);
 				}
 				try {
 					var builder = DnnModelParams.builder()
@@ -711,6 +713,53 @@ public class StarDist2D implements AutoCloseable {
 		}
 		
 	}
+
+	/**
+	 * Try to get a model file. First assume we have an absolute path, then check the user directory.
+	 * @param path
+	 * @return
+	 */
+	private static File findModelFile(String path) {
+		if (path == null || path.isEmpty())
+			return null;
+		var file = new File(path);
+		if (file.exists())
+			return file;
+		var userPath = UserDirectoryManager.getInstance().getUserPath();
+		if (userPath != null && Files.isDirectory(userPath)) {
+			try {
+				var potentialFiles = Files.walk(userPath)
+						.filter(p -> p.getFileName().toString().equals(path))
+						.sorted(Comparator.comparingInt((Path p) -> "stardist".equalsIgnoreCase(parentDirName(p)) ? -1 : 0)
+								.thenComparing((Path p) -> "models".equalsIgnoreCase(parentDirName(p)) ? -1 : 1)
+								.thenComparing(p -> p.toString()))
+						.map(p -> p.toFile())
+						.toList();
+				if (potentialFiles.isEmpty())
+					return null;
+				else if (potentialFiles.size() == 1) {
+					logger.debug("Found model file {}", file.getAbsolutePath());
+					return potentialFiles.get(0);
+				} else {
+					file = potentialFiles.get(0);
+					logger.warn("Found {} potential models for {}, will use {}",
+							potentialFiles.size(),
+							path,
+							file.getAbsolutePath());
+					return file;
+				}
+			} catch (IOException e) {
+				logger.error("Exception searching for model file: " + e.getMessage(), e);
+			}
+		}
+		return null;
+	}
+
+	private static String parentDirName(Path path) {
+		if (path == null || path.getParent() == null)
+			return null;
+		return path.getParent().getFileName().toString();
+	}
 	
 	private boolean doLog = false;
 	
@@ -721,7 +770,7 @@ public class StarDist2D implements AutoCloseable {
 	private ImageDataOp op;
 	private TileOpCreator globalPreprocess;
 	private List<ImageOp> preprocess;
-	private DnnModel<?> dnn;
+	private DnnModel dnn;
 	
 	private double pixelSize;
 	private double cellExpansion;
@@ -1180,7 +1229,7 @@ public class StarDist2D implements AutoCloseable {
 	}
 	
 	
-	private List<PotentialNucleus> detectObjectsForTile(ImageDataOp op, DnnModel<?> dnn, ImageData<BufferedImage> imageData, RegionRequest request, boolean excludeOnBounds, Geometry mask) {
+	private List<PotentialNucleus> detectObjectsForTile(ImageDataOp op, DnnModel dnn, ImageData<BufferedImage> imageData, RegionRequest request, boolean excludeOnBounds, Geometry mask) {
 
 		List<PotentialNucleus> nuclei;
 		
@@ -1240,7 +1289,7 @@ public class StarDist2D implements AutoCloseable {
 			
 			Map<String, Mat> output;
 //			synchronized(dnn) {
-				output = dnn.convertAndPredict(Map.of(DnnModel.DEFAULT_INPUT_NAME, mat));
+				output = dnn.predict(Map.of(DnnModel.DEFAULT_INPUT_NAME, mat));
 //			}
 			Mat matProb = null;
 			Mat matRays = null;
@@ -1398,7 +1447,7 @@ public class StarDist2D implements AutoCloseable {
 	 * @param dnn the model to use for prediction
 	 * @return
 	 */
-	public static Builder builder(DnnModel<?> dnn) {
+	public static Builder builder(DnnModel dnn) {
 		return new Builder(dnn);		
 	}
 	
@@ -1598,6 +1647,8 @@ public class StarDist2D implements AutoCloseable {
 	                    }
 	                }
 	            } catch (Exception e) {
+					logger.debug("Exception resolving nuclei: " + e.getMessage());
+					logger.trace(e.getMessage(), e);
                 	skippedNucleus.add(nucleus2);
 	            	skipErrorCount++;
 	            }
@@ -1605,9 +1656,11 @@ public class StarDist2D implements AutoCloseable {
         	}
 	    }
 	    if (skipErrorCount > 0) {
+			// Reduce warning to debug - this happens often for 1 or 2 nuclei but isn't necessarily
+			// a serious problem that the user should be aware of
 	    	int skipCount = skippedNucleus.size();
 	    	String s = skipErrorCount == 1 ? "1 nucleus" : skipErrorCount + " nuclei";
-	    	logger.warn("Skipped {} due to error in resolving overlaps ({}% of all skipped)", 
+	    	logger.debug("Skipped {} due to error in resolving overlaps ({}% of all skipped)",
 	    			s, GeneralTools.formatNumber(skipErrorCount*100.0/skipCount, 1));
 	    }
 	    return new ArrayList<>(nuclei);

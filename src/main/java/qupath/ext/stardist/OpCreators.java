@@ -129,7 +129,7 @@ public class OpCreators {
 			if (Double.isNaN(downsample)) {
 				downsample = Math.max(width, height) / (double)maxDimension;
 				downsample = Math.max(downsample, 1.0);
-				logger.info("Computed downsample: {}", downsample);
+				logger.debug("Computed downsample for global op: {}", downsample);
 			}
 			
 			var request = RegionRequest.createInstance(server.getPath(), downsample,
@@ -195,13 +195,13 @@ public class OpCreators {
 						c++;
 					}
 				}
-				logger.info("Computed percentile normalization offsets={}, scales={}", Arrays.toString(toSubtract), Arrays.toString(toScale));
+				logger.debug("Computed percentile normalization offsets={}, scales={}", Arrays.toString(toSubtract), Arrays.toString(toScale));
 				return List.of(
 						ImageOps.Core.subtract(toSubtract),
 						ImageOps.Core.multiply(toScale)							);
 			} else {
 				double[] percentiles = OpenCVTools.percentiles(mat, percentileMin, percentileMax);
-				logger.info("Computed percentiles {}, {}", percentiles[0], percentiles[1]);
+				logger.debug("Computed percentiles {}, {}", percentiles[0], percentiles[1]);
 				return List.of(
 						ImageOps.Core.subtract(percentiles[0]),
 						ImageOps.Core.multiply(1.0/Math.max(percentiles[1] - percentiles[0], 1e-6))							);
@@ -241,7 +241,7 @@ public class OpCreators {
 						c++;
 					}
 				}
-				logger.info("Computed mean/variance normalization offsets={}, scales={}", Arrays.toString(toSubtract), Arrays.toString(toScale));
+				logger.debug("Computed mean/variance normalization offsets={}, scales={}", Arrays.toString(toSubtract), Arrays.toString(toScale));
 				return List.of(
 						ImageOps.Core.subtract(toSubtract),
 						ImageOps.Core.multiply(toScale)
@@ -249,7 +249,7 @@ public class OpCreators {
 			} else {
 				double toSubtract = OpenCVTools.mean(mat);
 				double toScale = 1.0/(OpenCVTools.stdDev(mat) + eps);
-				logger.info("Computed mean/variance normalization offset={}, scale={}", toSubtract, toScale);
+				logger.debug("Computed mean/variance normalization offset={}, scale={}", toSubtract, toScale);
 				return List.of(
 						ImageOps.Core.subtract(toSubtract),
 						ImageOps.Core.multiply(toScale)
