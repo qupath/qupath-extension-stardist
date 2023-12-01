@@ -9,9 +9,14 @@ Welcome to the StarDist extension for [QuPath](http://qupath.github.io)!
 
 This adds support for running the 2D version of StarDist nucleus detection developed by Uwe Schmidt and Martin Weigert.
 
-The current version is written for QuPath v0.4.0 - the documentation is [here](https://qupath.readthedocs.io/en/0.4/docs/deep/stardist.html).
+The current version is written for QuPath v0.5.0 - the documentation is [here](https://qupath.readthedocs.io/en/0.5/docs/deep/stardist.html).
+
+See what's new in the [changelog](CHANGELOG.md);
 
 ## Installing
+
+**Better extension support in QuPath v0.5!**
+See [readthedocs](https://qupath.readthedocs.io/en/0.5/docs/intro/extensions.html) for details.
 
 To install the StarDist extension, download the latest `qupath-extension-stardist-[version].jar` file from [releases](https://github.com/qupath/qupath-extension-stardist/releases) and drag it onto the main QuPath window.
 

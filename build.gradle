@@ -9,10 +9,11 @@ plugins {
 ext.moduleName = 'qupath.extension.stardist'
 ext.qupathVersion = gradle.ext.qupathVersion
 
-description = 'QuPath extension to use StarDist'
-group = 'io.github.qupath'
-
-version = "0.5.0-SNAPSHOT"
+base {
+	description = 'QuPath extension to use StarDist'
+	version = "0.5.0-SNAPSHOT"
+	group = 'io.github.qupath'
+}
 
 repositories {
 	// Use this only for local development!
@@ -35,7 +36,7 @@ dependencies {
 	implementation libs.bundles.logging    
     
     testImplementation libs.junit
-    testRuntimeOnly libs.junit.engine
+    testRuntimeOnly libs.junit.platform
 }
 
 processResources {
