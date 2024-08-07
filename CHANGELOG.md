@@ -1,3 +1,10 @@
+## v0.6.0
+
+### Enhancements
+
+* Fix default layout with TensorFlow models (https://github.com/qupath/qupath-extension-stardist/issues/34)
+
+
 ## v0.5.0
 
 ### Enhancements

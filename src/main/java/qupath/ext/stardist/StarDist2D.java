@@ -660,9 +660,13 @@ public class StarDist2D implements AutoCloseable {
 					throw new IllegalArgumentException("I couldn't find the model file " + modelPath);
 				}
 				try {
+					var ndLayout = layout;
+					// If we have a saved model, default to channels-last with a batch dimension
+					if (file.isDirectory() && ndLayout == null)
+						ndLayout = "BYXC";
 					var builder = DnnModelParams.builder()
 							.files(file)
-							.layout(layout);
+							.layout(ndLayout);
 					var params = builder.build();
 					dnn = DnnModels.buildModel(params);
 					if (dnn != null)
