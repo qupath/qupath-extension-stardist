@@ -54,11 +54,11 @@ tasks.register("copyDependencies", Copy) {
 }
 
 /*
- * Ensure Java 11 compatibility
+ * Ensure suitable Java compatibility
  */
 java {
     toolchain {
-        languageVersion = JavaLanguageVersion.of(17)
+        languageVersion = JavaLanguageVersion.of(libs.versions.jdk.get())
     }
     if (project.properties['sources'])
 	    withSourcesJar()
