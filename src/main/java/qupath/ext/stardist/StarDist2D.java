@@ -1709,8 +1709,8 @@ public class StarDist2D implements AutoCloseable {
 
 	/**
 	 * Close and cleanup resources.
-	 * 
-	 * @implNote In practice, this means close any {@link DnnModel} stored if it is an instance of 
+	 * <p>
+	 * In practice, this means close any {@link DnnModel} stored if it is an instance of
 	 * {@link Closeable} or {@link AutoCloseable}.
 	 * This can be important to avoid memory leaks, particularly if using a GPU.
 	 */

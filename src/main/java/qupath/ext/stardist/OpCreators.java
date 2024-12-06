@@ -53,11 +53,12 @@ import qupath.opencv.tools.OpenCVTools;
  * Before this class, this was problematic because either the parameters needed to be calculated 
  * elsewhere (which was awkward), or else normalization would always treat each image tile independent - 
  * which could result in tiles within the same image being normalized in very different ways.
- * 
+ *
+ * <b>Warning!</b> This is currently in development.
+ * If it proves useful enough, it is likely to be refined and moved to the core QuPath software.
+ *
  * @author Pete Bankhead
  * @since v0.4.0
- * @implNote This is currently in development. If it proves useful enough, it is likely to be 
- * 			 refined and moved to the core QuPath software.
  */
 public class OpCreators {
 	
