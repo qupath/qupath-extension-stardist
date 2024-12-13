@@ -67,6 +67,7 @@ import qupath.lib.analysis.features.ObjectMeasurements;
 import qupath.lib.analysis.features.ObjectMeasurements.Compartments;
 import qupath.lib.analysis.features.ObjectMeasurements.Measurements;
 import qupath.lib.common.GeneralTools;
+import qupath.lib.common.LogTools;
 import qupath.lib.gui.UserDirectoryManager;
 import qupath.lib.images.ImageData;
 import qupath.lib.images.servers.ColorTransforms;
@@ -189,9 +190,22 @@ public class StarDist2D implements AutoCloseable {
 		 * @return this builder
 		 */
 		public Builder preprocess(ImageOp... ops) {
-			for (var op : ops)
-				this.preprocessing.add(op);
+            this.preprocessing.addAll(Arrays.asList(ops));
 			return this;
+		}
+
+		/**
+		 * Delegate to {@link #preprocessGlobal(TileOpCreator)}.
+		 * @param global
+		 * @return
+		 * @deprecated since v0.6.0
+		 */
+		@Deprecated
+		public Builder preprocess(TileOpCreator global) {
+			// See https://github.com/qupath/qupath-extension-stardist/issues/20
+			LogTools.warnOnce(logger,
+					"The preprocess(TileOpCreator) method is deprecated; use preprocessGlobal(TileOpCreator) instead");
+			return preprocessGlobal(global);
 		}
 		
 		/**
@@ -207,7 +221,7 @@ public class StarDist2D implements AutoCloseable {
 		 * @param global preprocessing operation
 		 * @return this builder
 		 */
-		public Builder preprocess(TileOpCreator global) {
+		public Builder preprocessGlobal(TileOpCreator global) {
 			this.globalPreprocessing = global;
 			return this;
 		}
