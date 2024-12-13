@@ -24,7 +24,7 @@ def modelPath = "/path/to/model.pb"
 // read the descriptions & remove the lines you don't want
 def stardist = StarDist2D
     .builder(modelPath)
-    .preprocess(                 // Apply normalization, calculating values across the whole image
+    .preprocessGlobal(                 // Apply normalization, calculating values across the whole image
         StarDist2D.imageNormalizationBuilder()
             .maxDimension(4096)    // Figure out how much to downsample large images to make sure the width & height are <= this value
 //          .downsample(1)         // Optional alternative to maxDimension to use the full-resolution image for normalization

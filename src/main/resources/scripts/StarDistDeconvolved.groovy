@@ -16,6 +16,7 @@
 
 import qupath.ext.stardist.StarDist2D
 import qupath.lib.scripting.QP
+import qupath.opencv.ops.ImageOps
 
 // IMPORTANT! Replace this with the path to your StarDist model
 // that takes a single channel as input (e.g. dsb2018_heavy_augment.pb)
@@ -24,14 +25,14 @@ import qupath.lib.scripting.QP
 def modelPath = "/path/to/model.pb"
 
 // Get current image - assumed to have color deconvolution stains set
-var imageData = getCurrentImageData()
+var imageData = QP.getCurrentImageData()
 var stains = imageData.getColorDeconvolutionStains()
 
 // Customize how the StarDist detection should be applied
 // Here some reasonable default options are specified
 def stardist = StarDist2D
     .builder(modelPath)
-    .preprocess( // Extra preprocessing steps, applied sequentially
+    .preprocess( // Extra preprocessing steps, applied sequentially (per-tile)
         ImageOps.Channels.deconvolve(stains), // Color deconvolution
         ImageOps.Channels.extract(0),         // Extract the first stain (indexing starts at 0)
         ImageOps.Filters.median(2)           // Apply a small median filter (optional!)
