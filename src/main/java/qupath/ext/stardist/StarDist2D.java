@@ -34,6 +34,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -686,7 +687,7 @@ public class StarDist2D implements AutoCloseable {
 					if (dnn != null)
 						logger.debug("Loaded model {} as {}", modelPath, dnn);
 				} catch (Exception e) {
-					logger.error("Unable to load model file: " + e.getLocalizedMessage(), e);
+                    logger.error("Unable to load model file: {}", e.getMessage(), e);
 					throw new RuntimeException("Unable to load StarDist model from " + modelPath, e);
 				}
 				// Report if we have no model
@@ -816,7 +817,7 @@ public class StarDist2D implements AutoCloseable {
 	private Collection<ObjectMeasurements.Compartments> compartments;
 	private Collection<ObjectMeasurements.Measurements> measurements;
 	
-	private AtomicBoolean firstRun = new AtomicBoolean(true);
+	private final AtomicBoolean firstRun = new AtomicBoolean(true);
 	private boolean cancelRuns = false;
 	
 	
@@ -852,18 +853,16 @@ public class StarDist2D implements AutoCloseable {
 			else
 				log("Processing with {} threads", nThreads);
 			// Using an outer thread poll impacts any parallel streams created inside
-			var pool = new ForkJoinPool(nThreads);
-			try {
-				pool.submit(() -> runnable.run());
-			} finally {
-				pool.shutdown();
-				try {
-					pool.awaitTermination(24, TimeUnit.HOURS);
-				} catch (InterruptedException e) {
-					logger.warn("Process was interrupted! " + e.getLocalizedMessage(), e);
-				}
-			}
-		} else {
+			try (var pool = new ForkJoinPool(nThreads)) {
+				var completion = pool.submit(runnable);
+				completion.get();
+			} catch (ExecutionException e) {
+                logger.error("Exception running StarDist: {}", e.getMessage(), e);
+            } catch (InterruptedException e) {
+				logger.warn("StarDist interrupted!");
+				logger.debug(e.getMessage(), e);
+            }
+        } else {
 			runnable.run();	
 		}
 	}
@@ -874,14 +873,14 @@ public class StarDist2D implements AutoCloseable {
 		if (parents.isEmpty())
 			return;
 		if (parents.size() == 1) {
-			detectObjects(imageData, parents.iterator().next(), true);
+			detectObjectsImpl(imageData, parents.iterator().next(), true);
 			return;
 		}
 		log("Processing {} parent objects", parents.size());
 		if (nThreads >= 0)
-			parents.stream().forEach(p -> detectObjects(imageData, p, false));
+			parents.forEach(p -> detectObjectsImpl(imageData, p, false));
 		else
-			parents.parallelStream().forEach(p -> detectObjects(imageData, p, false));
+			parents.parallelStream().forEach(p -> detectObjectsImpl(imageData, p, false));
 		
 		// Fire a global update event
 		imageData.getHierarchy().fireHierarchyChangedEvent(imageData.getHierarchy());
@@ -1011,7 +1010,7 @@ public class StarDist2D implements AutoCloseable {
 					try {
 						return convertToObject(n, plane, expansion, constrainToParent ? mask : null);
 					} catch (Exception e) {
-						logger.warn("Error converting to object: " + e.getLocalizedMessage(), e);
+                        logger.warn("Error converting to object: {}", e.getMessage(), e);
 						return null;
 					}
 				}).filter(n -> n != null)
@@ -1054,7 +1053,7 @@ public class StarDist2D implements AutoCloseable {
 				try {
 					ObjectMeasurements.addIntensityMeasurements(server2, cell, downsample, measurements, compartments);					
 				} catch (IOException e) {
-					log(e.getLocalizedMessage(), e);
+					log(e.getMessage(), e);
 				}
 			});
 			
@@ -1251,11 +1250,11 @@ public class StarDist2D implements AutoCloseable {
 
 		List<PotentialNucleus> nuclei;
 		
-		if (Thread.currentThread().isInterrupted())
+		if (Thread.interrupted())
 			cancelRuns = true;
 		
 		if (cancelRuns)
-			Collections.emptyList();
+			return Collections.emptyList();
 		
 		// Create a mask around pixels we can use
 		var regionMask = GeometryTools.createRectangle(request.getX(), request.getY(), request.getWidth(), request.getHeight());
@@ -1288,7 +1287,7 @@ public class StarDist2D implements AutoCloseable {
 			try {
 				mat = op.apply(imageData, requestPadded);
 			} catch (IOException e) {
-				logger.error(e.getLocalizedMessage(), e);
+				logger.error(e.getMessage(), e);
 				return Collections.emptyList();
 			}
 						
@@ -1441,9 +1440,9 @@ public class StarDist2D implements AutoCloseable {
 				return StarDistBioimageIo.builder(p);
 			}
 		} catch (IOException e) {
-			logger.debug("Exception attempting to parse BioimageIOSpec: " + e.getLocalizedMessage(), e);
+            logger.debug("Exception attempting to parse BioimageIOSpec: {}", e.getMessage(), e);
 		} catch (UnsatisfiedLinkError e) {
-			logger.debug("Unable to parse BioimageIOSpec: " + e.getLocalizedMessage(), e);				
+            logger.debug("Unable to parse BioimageIOSpec: {}", e.getMessage(), e);
 		}
 		return null;
 	}
@@ -1580,7 +1579,7 @@ public class StarDist2D implements AutoCloseable {
 		            		nuclei.add(new PotentialNucleus(geom, prob, classification));
 		            }
 	            } catch (Exception e) {
-	            	logger.warn("Error creating nucleus: " + e.getLocalizedMessage(), e);
+                    logger.warn("Error creating nucleus: {}", e.getMessage(), e);
 	            }
 	        }
 	    }
