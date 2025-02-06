@@ -29,12 +29,14 @@ import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import qupath.bioimageio.spec.BioimageIoSpec;
-import qupath.bioimageio.spec.BioimageIoSpec.BioimageIoModel;
-import qupath.bioimageio.spec.BioimageIoSpec.Processing.ScaleLinear;
-import qupath.bioimageio.spec.BioimageIoSpec.Processing.ScaleRange;
-import qupath.bioimageio.spec.BioimageIoSpec.Processing.ZeroMeanUnitVariance;
-import qupath.bioimageio.spec.BioimageIoSpec.WeightsEntry;
+import qupath.bioimageio.spec.tensor.Shape;
+import qupath.bioimageio.spec.Model;
+import qupath.bioimageio.spec.tensor.axes.Axes;
+import qupath.bioimageio.spec.tensor.Processing.ScaleLinear;
+import qupath.bioimageio.spec.tensor.Processing.ScaleRange;
+import qupath.bioimageio.spec.tensor.Processing.ZeroMeanUnitVariance;
+import qupath.bioimageio.spec.Weights.WeightsEntry;
+
 import qupath.ext.stardist.OpCreators.TileOpCreator;
 import qupath.lib.common.GeneralTools;
 import qupath.lib.io.GsonTools;
@@ -136,11 +138,11 @@ class StarDistBioimageIo {
 		}
 		
 		logger.debug("Creating builder from {} with maxDim={}, downsample={}", path.getFileName(), maxDim, downsample);
-		return builder(BioimageIoSpec.parseModel(path), maxDim, downsample);
+		return builder(Model.parse(path), maxDim, downsample);
 	}
 		
 	
-	static StarDist2D.Builder builder(BioimageIoModel model, int globalMaxDim, double globalDownsample) {
+	static StarDist2D.Builder builder(Model model, int globalMaxDim, double globalDownsample) {
 				
 		logger.info("Initializing builder from BioImage Model Zoo spec");
 		
@@ -150,13 +152,13 @@ class StarDistBioimageIo {
 			throw new IllegalArgumentException("Expected 1 input, but found " + inputs.size());
 		}
 		var input = inputs.get(0);
-		var inputAxes = input.getAxes().toLowerCase();
+		var inputAxes = Axes.getAxesString(input.getAxes()).toLowerCase();
 		int indX = inputAxes.indexOf("x");
 		int indY = inputAxes.indexOf("y");
 		var shape = input.getShape();
 		int tileWidth = StarDist2D.defaultTileSize, tileHeight = StarDist2D.defaultTileSize;
 		var inputShapeArray = shape.getTargetShape(
-				BioimageIoSpec.createShapeArray(inputAxes, Map.of('x', tileWidth, 'y', tileHeight), 1));
+				Shape.createShapeArray(inputAxes, Map.of('x', tileWidth, 'y', tileHeight), 1));
 		tileWidth = inputShapeArray[inputAxes.indexOf('x')];
 		tileHeight = inputShapeArray[inputAxes.indexOf('y')];
 		
@@ -169,7 +171,7 @@ class StarDistBioimageIo {
 			if (preprocessing.isEmpty()) {
 				if (preprocess instanceof ScaleLinear) {
 					var zeroMean = (ZeroMeanUnitVariance)preprocess;
-					var axes = zeroMean.getAxes();
+					var axes = Axes.getAxesString(zeroMean.getAxes());
 					boolean perChannel = axes == null ? true : !axes.contains("c");
 					logger.info("Normalization by zero-mean-unit-variance (perChannel={}, maxDim={}, downsample={})", perChannel, globalMaxDim, globalDownsample);
 					globalOpCreator = OpCreators.imageNormalizationBuilder()
@@ -181,7 +183,7 @@ class StarDistBioimageIo {
 					continue;
 				} else if (preprocess instanceof ScaleRange) {
 					var scaleRange = (ScaleRange)preprocess;
-					var axes = scaleRange.getAxes();
+					var axes = Axes.getAxesString(scaleRange.getAxes());
 					boolean perChannel = axes == null ? true : !axes.contains("c");
 					logger.info("Normalization by percentile (min={}, max={}, perChannel={}; maxDim={}, downsample={})",
 							scaleRange.getMinPercentile(), scaleRange.getMaxPercentile(),
@@ -219,7 +221,7 @@ class StarDistBioimageIo {
 			}
 		}
 		var output = model.getOutputs().get(0);
-		var axes = output.getAxes().toLowerCase();
+		var axes = Axes.getAxesString(output.getAxes()).toLowerCase();
 		indX = axes.indexOf("x");
 		indY = axes.indexOf("y");
 		int[] halo = output.getHalo();
