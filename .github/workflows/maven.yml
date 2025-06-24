@@ -26,7 +26,7 @@ jobs:
         if: ${{ inputs.release }}
         shell: bash
         run: |
-          echo "RELEASE_FLAG='-Prelease'" >> $GITHUB_ENV
+          echo "RELEASE_FLAG=-Prelease" >> $GITHUB_ENV
 
       - name: Publish
         shell: bash
