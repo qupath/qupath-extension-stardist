@@ -5,7 +5,7 @@ plugins {
 
 qupathExtension {
 	name = "qupath-extension-stardist"
-	version = "0.6.0-SNAPSHOT"
+	version = "0.6.0"
 	group = "io.github.qupath"
 	description = "A QuPath extension to run StarDist for nucleus detection"
 	automaticModule = "qupath.extension.stardist"
