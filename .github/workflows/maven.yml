@@ -35,7 +35,7 @@ jobs:
         env:
           MAVEN_USER: ${{ secrets.MAVEN_USER }}
           MAVEN_PASS: ${{ secrets.MAVEN_PASS }}
-          
+
       - uses: actions/upload-artifact@v4
         if: ${{ inputs.release }}
         with:
