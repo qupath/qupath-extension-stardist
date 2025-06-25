@@ -8,3 +8,5 @@ jobs:
     name: Publish snapshot
     uses: ./.github/workflows/maven.yml
     secrets: inherit
+    with:
+      release: true
