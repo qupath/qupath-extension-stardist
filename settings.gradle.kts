@@ -8,7 +8,7 @@ pluginManagement {
 }
 
 qupath {
-	version = "0.6.0-SNAPSHOT"
+	version = "0.6.0"
 }
 
 // Apply QuPath Gradle settings plugin to handle configuration
