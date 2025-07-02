@@ -5,7 +5,7 @@ on:
     inputs:
       release:
         type: boolean
-        description: Whether to make a release, or if not a snapshot
+        description: Should this be a release? (if not, do a snapshot)
         required: true
 
 jobs:
